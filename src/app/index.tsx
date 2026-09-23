@@ -1,22 +1,21 @@
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
-import AnimatedButton from '../components/AnimatedButton';
+
+import AnimatedButton from '@/components/AnimatedButton';
+import { boardingHouseList } from '@/data/boardingHouses';
 
 export default function IndexScreen() {
   const router = useRouter();
 
-  const buttons = [
-    { label: 'BH1', route: '/bh1' },
-    { label: 'BH2', route: '/bh2' },
-    { label: 'BH3', route: '/bh3' },
-    { label: 'BH4', route: '/bh4' },
-  ] as const;
-
   return (
     <View style={styles.container}>
       <Text style={styles.welcomeText}>HELLO, Admin</Text>
-      {buttons.map(({ label, route }) => (
-        <AnimatedButton key={label} label={label} onPress={() => router.push(route)} />
+      {boardingHouseList.map((house) => (
+        <AnimatedButton
+          key={house.id}
+          label={house.name}
+          onPress={() => router.push(`/bh/${house.id}`)}
+        />
       ))}
     </View>
   );

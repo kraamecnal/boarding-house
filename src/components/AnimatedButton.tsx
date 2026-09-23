@@ -1,23 +1,23 @@
 import { useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text } from 'react-native';
- 
+
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
- 
+
 type AnimatedButtonProps = {
   label: string;
   onPress: () => void;
 };
- 
+
 export default function AnimatedButton({ label, onPress }: AnimatedButtonProps) {
   const scale = useRef(new Animated.Value(1)).current;
- 
+
   const handlePressIn = () => {
     Animated.spring(scale, {
       toValue: 0.92,
       useNativeDriver: true,
     }).start();
   };
- 
+
   const handlePressOut = () => {
     Animated.spring(scale, {
       toValue: 1,
@@ -26,7 +26,7 @@ export default function AnimatedButton({ label, onPress }: AnimatedButtonProps) 
       useNativeDriver: true,
     }).start();
   };
- 
+
   return (
     <AnimatedPressable
       onPressIn={handlePressIn}
@@ -38,7 +38,7 @@ export default function AnimatedButton({ label, onPress }: AnimatedButtonProps) 
     </AnimatedPressable>
   );
 }
- 
+
 const styles = StyleSheet.create({
   button: {
     backgroundColor: '#007AFF',
@@ -58,18 +58,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
- 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
