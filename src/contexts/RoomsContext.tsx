@@ -8,15 +8,13 @@ export type Room = {
   lastName: string;
   email: string;
   contactNumber: string;
-  startDate: string; // e.g. "2026-09-17"
-  dueDate: string; // auto-calculated: 1 month after startDate, e.g. "2026-10-17"
+  startDate: string; 
+  dueDate: string; 
   monthlyRent: number;
-  idImageUri: string | null; // local URI of the tenant's uploaded valid-ID photo
+  idImageUri: string | null; 
   createdAt: string;
 };
  
-// dueDate is intentionally excluded here — it's derived from startDate
-// inside addRoom below, so the registration form never collects it.
 type NewRoomInput = Omit<Room, 'id' | 'createdAt' | 'dueDate'>;
  
 type RoomsAction =
@@ -37,11 +35,6 @@ function roomsReducer(state: Room[], action: RoomsAction): Room[] {
   }
 }
  
-/**
- * Adds exactly one calendar month to a "YYYY-MM-DD" date string.
- * Clamps to the last day of the target month when the source day doesn't
- * exist there, e.g. Jan 31 -> Feb 28 (or Feb 29 in a leap year), not Mar 3.
- */
 export function addOneMonth(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
   const targetMonthIndex = month; // `month` is 1-indexed, so this is already "next month" 0-indexed
@@ -65,13 +58,6 @@ type RoomsContextValue = {
  
 const RoomsContext = createContext<RoomsContextValue | undefined>(undefined);
  
-/**
- * Frontend-only in-memory store for registered tenants/rooms.
- *
- * This resets whenever the app restarts. When you're ready to wire this
- * up to a real backend, this is the ONLY file you need to change: swap
- * the `dispatch` calls below for API requests.
- */
 export function RoomsProvider({ children }: { children: ReactNode }) {
   const [rooms, dispatch] = useReducer(roomsReducer, []);
  
