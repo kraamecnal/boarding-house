@@ -1,12 +1,3 @@
-// src/contexts/BillsContext.tsx  (REWRITTEN)
-//
-// Remembers, for every tenant and month, what was typed into the Electricity
-// field and whether the bill is marked paid. Amounts (rent, fixed costs,
-// total) are NOT stored here: they are calculated on every render with
-// computeTotals() from utils/billing.ts, which is what keeps the total live.
-//
-// In-memory only, so it resets when the app restarts (same as RoomsContext).
-
 import { createContext, ReactNode, useContext, useMemo, useReducer } from 'react';
 
 import { DUE_DAY_OF_NEXT_MONTH } from '@/data/billingConfig';
@@ -14,12 +5,12 @@ import { dueDateFor, sanitizeAmountInput, todayIso } from '@/utils/billing';
 
 export type BillStatus = 'unpaid' | 'paid';
 
-/** Everything the bill screen needs that isn't calculated from the tenant's rent. */
+
 export type BillRecord = {
-  period: string; // "2026-09"
-  issuedDate: string; // "2026-09-22"
-  dueDate: string; // "2026-10-05"
-  electricity: string; // the raw text in the field, '' when nothing is typed yet
+  period: string; 
+  issuedDate: string; 
+  dueDate: string; 
+  electricity: string; 
   status: BillStatus;
   paidDate: string | null;
 };
@@ -68,9 +59,7 @@ function billsReducer(state: BillEntries, action: BillsAction): BillEntries {
 }
 
 type BillsContextValue = {
-  /** Changes whenever any bill changes. Pass it to FlatList's `extraData`. */
   records: BillEntries;
-  /** Always returns a record; a month nobody has touched yet gets sensible defaults. */
   getBill: (roomId: string, period: string) => BillRecord;
   setElectricity: (roomId: string, period: string, text: string) => void;
   setStatus: (roomId: string, period: string, status: BillStatus) => void;
@@ -88,7 +77,6 @@ export function BillsProvider({ children }: { children: ReactNode }) {
         const entry = records[entryKey(roomId, period)];
         return {
           period,
-          // Until something is typed or ticked, the issue date is simply "today".
           issuedDate: entry?.issuedDate ?? todayIso(),
           dueDate: dueDateFor(period, DUE_DAY_OF_NEXT_MONTH),
           electricity: entry?.electricity ?? '',
