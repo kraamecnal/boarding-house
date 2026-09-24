@@ -1,7 +1,3 @@
-// src/app/bh/[id]/index.tsx  (REWRITTEN: this is the BH tenant list, NOT the Home screen)
-// Route: /bh/1, /bh/2, /bh/3, /bh/4
-// Each tenant's info is now one big button. Tapping it opens /bill/[roomId].
-
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +13,7 @@ export default function BoardingHouseScreen() {
   const router = useRouter();
   const house = boardingHouses[id as string];
   const { getRoomsForHouse } = useRooms();
-  const { records, getBill } = useBills(); // keep hooks above the early return
+  const { records, getBill } = useBills(); 
 
   if (!house) {
     return (
@@ -42,7 +38,7 @@ export default function BoardingHouseScreen() {
       ) : (
         <FlatList
           data={rooms}
-          extraData={records} // re-render the cards when a bill changes
+          extraData={records} 
           keyExtractor={(room) => room.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
