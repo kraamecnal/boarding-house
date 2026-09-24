@@ -1,6 +1,3 @@
-// src/app/bill/[roomId].tsx  (REWRITTEN)
-// Route: /bill/<tenant id>. Opened by tapping a tenant button on the BH screen.
-
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
