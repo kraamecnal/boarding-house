@@ -1,9 +1,3 @@
-// src/components/BillStatement.tsx  (REWRITTEN)
-//
-// The monthly bill, laid out like your example. "Electricity" is a text field;
-// every amount below it is recalculated on each keystroke (computeTotals runs
-// on every render), so the total updates in real time.
-
 import { Ionicons } from '@expo/vector-icons';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
