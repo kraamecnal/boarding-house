@@ -5,8 +5,8 @@ export type Room = {
 };
 
 export type BoardingHouse = {
-  id: string;     
-  name: string;     
+  id: string;
+  name: string;
   rooms: Room[];
 };
 

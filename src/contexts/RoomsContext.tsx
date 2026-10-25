@@ -11,6 +11,7 @@ export type Room = {
   startDate: string; 
   dueDate: string; 
   monthlyRent: number;
+
   idImageUri: string | null; 
   createdAt: string;
 };
@@ -34,10 +35,10 @@ function roomsReducer(state: Room[], action: RoomsAction): Room[] {
       return state;
   }
 }
- 
+
 export function addOneMonth(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
-  const targetMonthIndex = month; // `month` is 1-indexed, so this is already "next month" 0-indexed
+  const targetMonthIndex = month; 
   const daysInTargetMonth = new Date(year, targetMonthIndex + 1, 0).getDate();
   const clampedDay = Math.min(day, daysInTargetMonth);
   const result = new Date(year, targetMonthIndex, clampedDay);

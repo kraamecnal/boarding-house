@@ -46,7 +46,6 @@ export function dueDateFor(period: string, dueDay: number): string {
   return `${next}-${pad(Math.min(dueDay, daysInMonth))}`;
 }
 
-
 export function formatPeso(amount: number): string {
   const [whole, decimals] = amount.toFixed(2).split('.');
   const withCommas = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');

@@ -3,7 +3,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import { BillsProvider } from '@/contexts/BillsContext'; // NEW
+import { BillsProvider } from '@/contexts/BillsContext'; 
 import { RoomsProvider } from '@/contexts/RoomsContext';
 
 SplashScreen.preventAutoHideAsync();
@@ -13,7 +13,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <RoomsProvider>
-        <BillsProvider>{/* NEW: wraps the Stack so every screen can call useBills() */}
+        <BillsProvider>
           <AnimatedSplashOverlay />
           <Stack>
             <Stack.Screen name="index" options={{ headerShown: false }} />

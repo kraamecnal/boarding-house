@@ -26,7 +26,6 @@ export default function TenantBillScreen() {
   const { getBill, setElectricity, setStatus } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
 
-  // A tenant can't be billed for months before they moved in, or for future months.
   const minPeriod = room ? room.startDate.slice(0, 7) : currentPeriod();
   const thisMonth = currentPeriod();
   const maxPeriod = thisMonth >= minPeriod ? thisMonth : minPeriod;
