@@ -4,14 +4,15 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import AnimatedFAB from '@/components/AnimatedFAB';
 import { useBills } from '@/contexts/BillsContext';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { useRooms } from '@/contexts/RoomsContext';
-import { boardingHouses } from '@/data/boardingHouses';
 import { computeTotals, currentPeriod, formatPeso, periodLabel } from '@/utils/billing';
 
 export default function BoardingHouseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const house = boardingHouses[id as string];
+  const { getHouseById } = useBoardingHouses();
+  const house = getHouseById(id as string);
   const { getRoomsForHouse } = useRooms();
   const { records, getBill } = useBills(); 
 
@@ -37,6 +38,7 @@ export default function BoardingHouseScreen() {
         </Text>
       ) : (
         <FlatList
+          ListHeaderComponent={<Text style={styles.houseAddress}>{house.address}</Text>}
           data={rooms}
           extraData={records} 
           keyExtractor={(room) => room.id}
@@ -94,6 +96,12 @@ export default function BoardingHouseScreen() {
 }
 
 const styles = StyleSheet.create({
+  houseAddress: {
+  fontSize: 14,
+  color: '#6B7280',
+  marginBottom: 4,
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',

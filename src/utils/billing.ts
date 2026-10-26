@@ -29,6 +29,26 @@ export function shiftPeriod(period: string, delta: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
+/** Whole days from `fromIso` to `toIso` (both 'YYYY-MM-DD'). Negative if toIso is earlier. */
+export function daysBetween(fromIso: string, toIso: string): number {
+  const [fy, fm, fd] = fromIso.split('-').map(Number);
+  const [ty, tm, td] = toIso.split('-').map(Number);
+  const from = Date.UTC(fy, fm - 1, fd);
+  const to = Date.UTC(ty, tm - 1, td);
+  return Math.round((to - from) / 86_400_000);
+}
+
+/** Every 'YYYY-MM' period from start through end, inclusive. */
+export function listPeriods(startPeriod: string, endPeriod: string): string[] {
+  const periods: string[] = [];
+  let p = startPeriod;
+  while (p <= endPeriod) {
+    periods.push(p);
+    p = shiftPeriod(p, 1);
+  }
+  return periods;
+}
+
 export function periodLabel(period: string): string {
   const [year, month] = period.split('-').map(Number);
   return `${MONTHS_LONG[month - 1]} ${year}`;
