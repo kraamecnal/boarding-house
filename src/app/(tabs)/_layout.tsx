@@ -2,12 +2,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
 export const unstable_settings = {
-  initialRouteName: 'manage',
+  initialRouteName: 'index', // opens on Boarding Houses
 };
 
 export default function TabsLayout() {
   return (
     <Tabs
+      backBehavior="initialRoute"
       screenOptions={{
         tabBarActiveTintColor: '#2563EB',
         tabBarInactiveTintColor: '#64748B',

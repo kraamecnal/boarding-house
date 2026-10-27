@@ -1,10 +1,10 @@
 import type { BillRecord } from '@/contexts/BillsContext';
-import type { Room } from '@/contexts/RoomsContext';
+import { isOccupied, type OccupiedRoom, type Room } from '@/contexts/RoomsContext';
 import { computeTotals, currentPeriod, daysBetween, listPeriods, todayIso } from '@/utils/billing';
 
 export type DueItem = {
   key: string;
-  room: Room;
+  room: OccupiedRoom;
   period: string; // billing month, 'YYYY-MM'
   dueDate: string; // 'YYYY-MM-DD'
   daysUntilDue: number; // negative = overdue
@@ -21,6 +21,7 @@ type GetBill = (roomId: string, period: string) => BillRecord;
 
 /**
  * Walks every month from each tenant's start month through the current month.
+ * Vacant rooms have no tenant and are skipped.
  * Months with no stored record are treated as unpaid (getBill returns defaults).
  */
 export function computeDues(rooms: Room[], getBill: GetBill): DueSummary {
@@ -31,7 +32,9 @@ export function computeDues(rooms: Room[], getBill: GetBill): DueSummary {
   const overdue: DueItem[] = [];
 
   for (const room of rooms) {
-    const startPeriod = room.startDate.slice(0, 7);
+    if (!isOccupied(room)) continue; // vacant rooms have nothing to bill
+
+    const startPeriod = room.tenant.startDate.slice(0, 7);
     if (startPeriod > thisPeriod) continue; // tenant hasn't started yet
 
     for (const period of listPeriods(startPeriod, thisPeriod)) {
@@ -44,7 +47,7 @@ export function computeDues(rooms: Room[], getBill: GetBill): DueSummary {
         period,
         dueDate: record.dueDate,
         daysUntilDue: daysBetween(today, record.dueDate),
-        total: computeTotals(room.monthlyRent, record.electricity).total,
+        total: computeTotals(room.monthlyRate, record.electricity).total,
         electricityEntered: record.electricity !== '',
       };
 

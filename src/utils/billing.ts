@@ -1,5 +1,5 @@
 import type { BillStatus } from '@/contexts/BillsContext';
-import type { Room } from '@/contexts/RoomsContext';
+import type { OccupiedRoom } from '@/contexts/RoomsContext';
 import { FIXED_COSTS_AMOUNT, FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
 
 const MONTHS_LONG = [
@@ -115,7 +115,7 @@ const center = (text: string) =>
   ' '.repeat(Math.max(0, Math.floor((WIDTH - text.length) / 2))) + text;
 
 type BillTextInput = {
-  room: Room;
+  room: OccupiedRoom;
   period: string;
   issuedDate: string;
   dueDate: string;
@@ -131,7 +131,7 @@ export function buildBillText({
   electricity,
   status,
 }: BillTextInput): string {
-  const totals = computeTotals(room.monthlyRent, electricity);
+  const totals = computeTotals(room.monthlyRate, electricity);
   const heavy = '═'.repeat(WIDTH);
   const light = '-'.repeat(WIDTH);
 
@@ -141,9 +141,9 @@ export function buildBillText({
     heavy,
     '',
     field('Room No.:', room.roomName),
-    field('Tenant Name:', `${room.firstName} ${room.lastName}`),
-    field('Contact:', room.contactNumber),
-    field('Email:', room.email),
+    field('Tenant Name:', `${room.tenant.firstName} ${room.tenant.lastName}`),
+    field('Contact:', room.tenant.contactNumber),
+    field('Email:', room.tenant.email),
     '',
     light,
     field('Billing Period:', periodLabel(period)),

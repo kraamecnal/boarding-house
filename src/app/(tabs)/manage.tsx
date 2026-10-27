@@ -125,7 +125,7 @@ function DashboardSection({
               style={({ pressed }) => [styles.dueItem, pressed && styles.dueItemPressed]}>
               <View style={styles.dueItemCopy}>
                 <Text numberOfLines={1} style={styles.tenantName}>
-                  {item.room.firstName} {item.room.lastName}
+                  {item.room.tenant.firstName} {item.room.tenant.lastName}
                 </Text>
                 <Text style={styles.dueDetail}>
                   {item.room.roomName} · {periodLabel(item.period)} · {formatShortDate(item.dueDate)}

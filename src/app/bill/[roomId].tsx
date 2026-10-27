@@ -15,7 +15,7 @@ import {
 
 import BillStatement from '@/components/BillStatement';
 import { useBills } from '@/contexts/BillsContext';
-import { useRooms } from '@/contexts/RoomsContext';
+import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import { buildBillText, currentPeriod, periodLabel, shiftPeriod } from '@/utils/billing';
 
 export default function TenantBillScreen() {
@@ -27,7 +27,7 @@ export default function TenantBillScreen() {
   const { getBill, setElectricity, setStatus } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
 
-  const minPeriod = room ? room.startDate.slice(0, 7) : currentPeriod();
+  const minPeriod = room && isOccupied(room) ? room.tenant.startDate.slice(0, 7) : currentPeriod();
   const thisMonth = currentPeriod();
   const maxPeriod = thisMonth >= minPeriod ? thisMonth : minPeriod;
 
@@ -37,10 +37,12 @@ export default function TenantBillScreen() {
       : maxPeriod;
   const [period, setPeriod] = useState(initialPeriod);
 
-  if (!room) {
+  if (!room || !isOccupied(room)) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.emptyText}>Tenant not found.</Text>
+        <Text style={styles.emptyText}>
+          {room ? 'This room has no tenant yet.' : 'Tenant not found.'}
+        </Text>
       </View>
     );
   }

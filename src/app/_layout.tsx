@@ -52,6 +52,10 @@ function AppNavigator() {
         <Stack.Screen name="bh/[id]/index" options={{ title: 'Tenant Keeper' }} />
         <Stack.Screen
           name="bh/[id]/room/new"
+          options={{ title: 'Register Room', presentation: 'modal' }}
+        />
+        <Stack.Screen
+          name="bh/[id]/room/[roomId]/tenant"
           options={{ title: 'Register Tenant', presentation: 'modal' }}
         />
         <Stack.Screen name="bill/[roomId]" options={{ title: 'Monthly Bill' }} />
