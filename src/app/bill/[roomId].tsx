@@ -2,15 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    Share,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import BillStatement from '@/components/BillStatement';
@@ -19,8 +19,9 @@ import { useRooms } from '@/contexts/RoomsContext';
 import { buildBillText, currentPeriod, periodLabel, shiftPeriod } from '@/utils/billing';
 
 export default function TenantBillScreen() {
-  const params = useLocalSearchParams<{ roomId: string }>();
+  const params = useLocalSearchParams<{ roomId: string; period?: string }>();
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
+  const requestedPeriod = Array.isArray(params.period) ? params.period[0] : params.period;
 
   const { getRoomById } = useRooms();
   const { getBill, setElectricity, setStatus } = useBills();
@@ -30,7 +31,11 @@ export default function TenantBillScreen() {
   const thisMonth = currentPeriod();
   const maxPeriod = thisMonth >= minPeriod ? thisMonth : minPeriod;
 
-  const [period, setPeriod] = useState(maxPeriod);
+  const initialPeriod =
+    requestedPeriod && requestedPeriod >= minPeriod && requestedPeriod <= maxPeriod
+      ? requestedPeriod
+      : maxPeriod;
+  const [period, setPeriod] = useState(initialPeriod);
 
   if (!room) {
     return (

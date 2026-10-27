@@ -6,9 +6,13 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 type AnimatedFABProps = {
   onPress: () => void;
   label?: string;
+  accessibilityLabel?: string;
 };
 
-export default function AnimatedFAB({ onPress, label = '+' }: AnimatedFABProps) {
+export default function AnimatedFAB({
+  onPress,
+  label = '+',
+  accessibilityLabel = 'Register a new room'}: AnimatedFABProps) {
   const scale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
@@ -34,7 +38,7 @@ export default function AnimatedFAB({ onPress, label = '+' }: AnimatedFABProps) 
       onPress={onPress}
       style={[styles.fab, { transform: [{ scale }] }]}
       accessibilityRole="button"
-      accessibilityLabel="Register a new room"
+      accessibilityLabel={accessibilityLabel}
     >
       <Text style={styles.icon}>{label}</Text>
     </AnimatedPressable>

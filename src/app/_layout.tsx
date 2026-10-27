@@ -3,8 +3,13 @@ import * as SplashScreen from 'expo-splash-screen';
 import { ActivityIndicator, StyleSheet, View, useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+<<<<<<< HEAD
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { BillsProvider } from '@/contexts/BillsContext'; 
+=======
+import { BillsProvider } from '@/contexts/BillsContext';
+import { BoardingHousesProvider } from '@/contexts/BoardingHousesContext';
+>>>>>>> dca361b4c724397555ad0872f012f936273f5a21
 import { RoomsProvider } from '@/contexts/RoomsContext';
 
 SplashScreen.preventAutoHideAsync();
@@ -53,6 +58,7 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+<<<<<<< HEAD
       <AuthProvider>
         <RoomsProvider>
           <BillsProvider>
@@ -60,6 +66,28 @@ export default function RootLayout() {
           </BillsProvider>
         </RoomsProvider>
       </AuthProvider>
+=======
+      <BoardingHousesProvider>
+        <RoomsProvider>
+          <BillsProvider>
+            <AnimatedSplashOverlay />
+            <Stack>
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="register-house"
+                options={{ title: 'Register Boarding House', presentation: 'modal' }}
+              />
+              <Stack.Screen name="bh/[id]/index" options={{ title: 'Tenant Keeper' }} />
+              <Stack.Screen
+                name="bh/[id]/room/new"
+                options={{ title: 'Register Tenant', presentation: 'modal' }}
+              />
+              <Stack.Screen name="bill/[roomId]" options={{ title: 'Monthly Bill' }} />
+            </Stack>
+          </BillsProvider>
+        </RoomsProvider>
+      </BoardingHousesProvider>
+>>>>>>> dca361b4c724397555ad0872f012f936273f5a21
     </ThemeProvider>
   );
 }
