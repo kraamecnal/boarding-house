@@ -35,12 +35,22 @@ You can start developing by editing the files inside the **app** directory. This
    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
    ```
 
+   The local `.env` file is ignored by Git. Restart Expo after changing it:
+
+   ```bash
+   npx expo start --clear
+   ```
+
 3. Keep the Supabase confirmation email link set to `{{ .ConfirmationURL }}` so Supabase verifies the email before redirecting to the app.
 4. For **Expo Go**, sign up once and copy the `Supabase email confirmation redirect` URI from the Metro terminal. Add that exact URI (it will start with `exp://` or `exps://` and contain `/--/auth/callback`) under Supabase **Authentication → URL Configuration → Redirect URLs**. If the Expo Go development URL changes, update the allow-list entry and request a new confirmation email.
 5. For an installed Android development or production build, add `boardinghouse://auth/callback` to the same Supabase Redirect URLs list. Rebuild and reinstall after changing the app scheme.
 6. Create an account from the sign-up tab and open its confirmation email on the Android device while the Expo Go development server is reachable. The app verifies the callback and returns to sign in.
 
 Only use the Supabase publishable key in the app. Never put a secret or service-role key in an `EXPO_PUBLIC_` variable or in client code.
+
+Authentication is connected to Supabase. Boarding houses, rooms, and bills are currently kept in app memory and are not saved to Supabase yet.
+
+The Manage tab shows the dashboard summary. Open the gear menu to visit Billing charges or Profile; the Profile page links to the About and Version information.
 
 ## Get a fresh project
 

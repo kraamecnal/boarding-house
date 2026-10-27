@@ -24,6 +24,18 @@ export const Colors = {
   },
 } as const;
 
+export const DashboardColors = {
+  primary: '#2563EB',
+  dark: '#1E3A8A',
+  medium: '#3B82F6',
+  light: '#DBEAFE',
+  pale: '#EFF6FF',
+  white: '#FFFFFF',
+  neutral: '#64748B',
+  text: '#0F172A',
+  border: '#BFDBFE',
+} as const;
+
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({

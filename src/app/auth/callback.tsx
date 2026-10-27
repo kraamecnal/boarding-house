@@ -21,20 +21,18 @@ export default function AuthCallbackScreen() {
     ? params.error_description[0]
     : params.error_description;
   const errorCode = Array.isArray(params.error) ? params.error[0] : params.error;
+  const callbackError = authError || errorCode
+    ? authError || `Email confirmation failed (${errorCode}).`
+    : !isLoading && !code
+      ? 'The confirmation link is incomplete or has expired. Request a new one.'
+      : null;
+  const displayedError = errorMessage ?? callbackError;
 
   useEffect(() => {
     if (isLoading || hasHandledCallback.current) return;
     hasHandledCallback.current = true;
 
-    if (authError || errorCode) {
-      setErrorMessage(authError || `Email confirmation failed (${errorCode}).`);
-      return;
-    }
-
-    if (!code) {
-      setErrorMessage('The confirmation link is incomplete or has expired. Request a new one.');
-      return;
-    }
+    if (authError || errorCode || !code) return;
 
     const completeConfirmation = async () => {
       const client = getSupabaseClient();
@@ -59,11 +57,11 @@ export default function AuthCallbackScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.content}>
-        {errorMessage ? (
+        {displayedError ? (
           <>
             <Text style={styles.title}>Could not confirm email</Text>
             <Text accessibilityLiveRegion="polite" style={styles.message}>
-              {errorMessage}
+              {displayedError}
             </Text>
             <Pressable
               accessibilityRole="button"

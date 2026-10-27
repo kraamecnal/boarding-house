@@ -1,147 +1,255 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import DueRow from '@/components/DueRow';
+import DashboardDrawer from '@/components/DashboardDrawer';
+import { DashboardColors } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 import { useBills } from '@/contexts/BillsContext';
-import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { useRooms } from '@/contexts/RoomsContext';
-import { formatPeso } from '@/utils/billing';
-import { computeDues } from '@/utils/dues';
-
-type Segment = 'upcoming' | 'unpaid';
+import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
+import { computeDues, type DueItem } from '@/utils/dues';
 
 export default function ManageScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { session } = useAuth();
   const { rooms } = useRooms();
-  const { getBill } = useBills(); // changes whenever bill records change
-  const { getHouseById } = useBoardingHouses();
-  const [segment, setSegment] = useState<Segment>('upcoming');
+  const { getBill } = useBills();
+  const [drawerVisible, setDrawerVisible] = useState(false);
 
   const { upcoming, overdue } = useMemo(
     () => computeDues(rooms, getBill),
-    [rooms, getBill]
+    [getBill, rooms],
   );
-
-  const data = segment === 'upcoming' ? upcoming : overdue;
-  const outstanding = data.reduce((sum, item) => sum + item.total, 0);
+  const metadata = session?.user.user_metadata ?? {};
+  const metadataName = [metadata.full_name, metadata.name, metadata.display_name].find(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0,
+  );
+  const username = metadataName?.trim() ?? session?.user.email?.split('@')[0] ?? 'Admin';
 
   return (
     <View style={styles.container}>
-      <View style={styles.segmentBar}>
-        <SegmentButton
-          label={`Upcoming (${upcoming.length})`}
-          active={segment === 'upcoming'}
-          onPress={() => setSegment('upcoming')}
-        />
-        <SegmentButton
-          label={`Unpaid (${overdue.length})`}
-          active={segment === 'unpaid'}
-          onPress={() => setSegment('unpaid')}
-        />
-      </View>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 8 }]}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Pressable
+            accessibilityLabel="Open settings menu"
+            accessibilityRole="button"
+            accessibilityState={{ expanded: drawerVisible }}
+            onPress={() => setDrawerVisible(true)}
+            style={styles.headerButton}>
+            <Ionicons color={DashboardColors.dark} name="settings-outline" size={24} />
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Notifications"
+            accessibilityRole="button"
+            onPress={() => Alert.alert('Notifications', 'Notifications are not available yet.')}
+            style={styles.headerButton}>
+            <Ionicons color={DashboardColors.dark} name="notifications-outline" size={23} />
+          </Pressable>
+        </View>
 
-      <FlatList
-        data={data}
-        keyExtractor={(item) => item.key}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={
-          data.length > 0 ? (
-            <Text style={styles.summary}>
-              {segment === 'upcoming' ? 'Expected: ' : 'Outstanding: '}
-              {formatPeso(outstanding)}
-            </Text>
-          ) : undefined
-        }
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            {segment === 'upcoming'
-              ? 'No upcoming due dates.\nRegister a tenant to start tracking bills.'
-              : 'No unpaid overdue bills. '}
-          </Text>
-        }
-        renderItem={({ item }) => (
-          <DueRow
-            item={item}
-            houseName={getHouseById(item.room.boardingHouseId)?.name ?? 'Unknown'}
-            onPress={() => router.push(`/bill/${item.room.id}?period=${item.period}`)}
-          />
-        )}
-      />
+        <Text style={styles.greeting}>HELLO, {username}</Text>
+
+        <DashboardSection
+          title="Upcoming monthly due dates"
+          items={upcoming}
+          emptyMessage="No upcoming due dates yet."
+          onSeeAll={() => router.push('/billing-charges')}
+          onItemPress={(item) =>
+            router.push(`/bill/${item.room.id}?period=${item.period}`)
+          }
+        />
+        <DashboardSection
+          title="Unpaid tenants"
+          items={overdue}
+          emptyMessage="No unpaid overdue bills."
+          onSeeAll={() => router.push('/billing-charges')}
+          onItemPress={(item) =>
+            router.push(`/bill/${item.room.id}?period=${item.period}`)
+          }
+        />
+      </ScrollView>
+
+      <DashboardDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
     </View>
   );
 }
 
-function SegmentButton({
-  label,
-  active,
-  onPress,
+function DashboardSection({
+  title,
+  items,
+  emptyMessage,
+  onSeeAll,
+  onItemPress,
 }: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
+  title: string;
+  items: DueItem[];
+  emptyMessage: string;
+  onSeeAll: () => void;
+  onItemPress: (item: DueItem) => void;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.segment, active && styles.segmentActive]}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-    >
-      <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text>
-    </Pressable>
+    <View style={styles.section}>
+      <View style={styles.sectionHeading}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {items.length > 0 && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={onSeeAll}
+            style={styles.seeAllButton}>
+            <Text style={styles.seeAllText}>See all</Text>
+          </Pressable>
+        )}
+      </View>
+      <View style={styles.sectionCard}>
+        {items.length === 0 ? (
+          <Text style={styles.emptyMessage}>{emptyMessage}</Text>
+        ) : (
+          items.slice(0, 2).map((item) => (
+            <Pressable
+              accessibilityRole="button"
+              key={item.key}
+              onPress={() => onItemPress(item)}
+              style={({ pressed }) => [styles.dueItem, pressed && styles.dueItemPressed]}>
+              <View style={styles.dueItemCopy}>
+                <Text numberOfLines={1} style={styles.tenantName}>
+                  {item.room.firstName} {item.room.lastName}
+                </Text>
+                <Text style={styles.dueDetail}>
+                  {item.room.roomName} · {periodLabel(item.period)} · {formatShortDate(item.dueDate)}
+                </Text>
+              </View>
+              <Text style={styles.amount}>{formatPeso(item.total)}</Text>
+            </Pressable>
+          ))
+        )}
+        {items.length > 2 && (
+          <Pressable accessibilityRole="button" onPress={onSeeAll} style={styles.moreLink}>
+            <Text style={styles.seeAllText}>View {items.length - 2} more</Text>
+            <Ionicons color={DashboardColors.primary} name="arrow-forward" size={15} />
+          </Pressable>
+        )}
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: DashboardColors.white,
   },
-  segmentBar: {
-    flexDirection: 'row',
-    margin: 16,
-    marginBottom: 0,
-    padding: 4,
-    borderRadius: 10,
-    backgroundColor: '#E4E7EC',
-    gap: 4,
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  segmentActive: {
-    backgroundColor: 'white',
-  },
-  segmentText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  segmentTextActive: {
-    color: '#1A2B3C',
-  },
-  listContent: {
-    padding: 16,
-    gap: 12,
+  content: {
     flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    gap: 24,
   },
-  summary: {
+  header: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 22,
+  },
+  greeting: {
+    marginTop: 4,
+    color: DashboardColors.dark,
+    fontSize: 23,
+    fontWeight: '800',
+    fontStyle: 'italic',
+  },
+  section: {
+    gap: 8,
+  },
+  sectionHeading: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    color: DashboardColors.dark,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#1A2B3C',
-    marginBottom: 4,
+    fontWeight: '700',
   },
-  emptyText: {
-    flex: 1,
-    marginTop: 80,
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#7A8494',
+  seeAllButton: {
+    paddingVertical: 4,
+    paddingLeft: 8,
+  },
+  seeAllText: {
+    color: DashboardColors.primary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  sectionCard: {
+    minHeight: 132,
+    justifyContent: 'center',
+    padding: 14,
+    gap: 8,
+    borderWidth: 2,
+    borderColor: DashboardColors.border,
+    borderRadius: 28,
+    backgroundColor: DashboardColors.pale,
+  },
+  emptyMessage: {
+    color: DashboardColors.neutral,
+    fontSize: 14,
     textAlign: 'center',
-    paddingHorizontal: 40,
+  },
+  dueItem: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  dueItemPressed: {
+    backgroundColor: DashboardColors.light,
+  },
+  dueItemCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  tenantName: {
+    color: DashboardColors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  dueDetail: {
+    color: DashboardColors.neutral,
+    fontSize: 11,
+  },
+  amount: {
+    color: DashboardColors.dark,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  moreLink: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
   },
 });

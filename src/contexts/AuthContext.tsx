@@ -17,14 +17,11 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
   const [initializationError, setInitializationError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setIsLoading(false);
-      return;
-    }
+    if (!isSupabaseConfigured) return;
 
     let isMounted = true;
     const client = getSupabaseClient();
