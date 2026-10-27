@@ -25,6 +25,23 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
+## Supabase authentication
+
+1. Create a Supabase project and copy its Project URL and publishable key from the project API settings.
+2. Copy `.env.example` to `.env` and replace the example values:
+
+   ```env
+   EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+   ```
+
+3. Keep the Supabase confirmation email link set to `{{ .ConfirmationURL }}` so Supabase verifies the email before redirecting to the app.
+4. For **Expo Go**, sign up once and copy the `Supabase email confirmation redirect` URI from the Metro terminal. Add that exact URI (it will start with `exp://` or `exps://` and contain `/--/auth/callback`) under Supabase **Authentication → URL Configuration → Redirect URLs**. If the Expo Go development URL changes, update the allow-list entry and request a new confirmation email.
+5. For an installed Android development or production build, add `boardinghouse://auth/callback` to the same Supabase Redirect URLs list. Rebuild and reinstall after changing the app scheme.
+6. Create an account from the sign-up tab and open its confirmation email on the Android device while the Expo Go development server is reachable. The app verifies the callback and returns to sign in.
+
+Only use the Supabase publishable key in the app. Never put a secret or service-role key in an `EXPO_PUBLIC_` variable or in client code.
+
 ## Get a fresh project
 
 When you're ready, run:
