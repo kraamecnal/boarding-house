@@ -1,8 +1,10 @@
+import type { Session } from '@supabase/supabase-js';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { getSupabaseClient } from '@/utils/supabase';
 
@@ -11,55 +13,76 @@ export default function AuthCallbackScreen() {
     code?: string | string[];
     error?: string | string[];
     error_description?: string | string[];
+    token_hash?: string | string[];
+    type?: string | string[];
   }>();
   const router = useRouter();
   const { isLoading } = useAuth();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const hasHandledCallback = useRef(false);
-  const code = Array.isArray(params.code) ? params.code[0] : params.code;
-  const authError = Array.isArray(params.error_description)
-    ? params.error_description[0]
-    : params.error_description;
-  const errorCode = Array.isArray(params.error) ? params.error[0] : params.error;
+  const code = firstParam(params.code);
+  const tokenHash = firstParam(params.token_hash);
+  const otpType = firstParam(params.type);
+  const authError = firstParam(params.error_description);
+  const errorCode = firstParam(params.error);
+  const hasCallbackCredential = Boolean(code || tokenHash);
   const callbackError = authError || errorCode
-    ? authError || `Email confirmation failed (${errorCode}).`
-    : !isLoading && !code
-      ? 'The confirmation link is incomplete or has expired. Request a new one.'
-      : null;
+    ? authError || `The email link could not be verified (${errorCode}).`
+    : !isLoading && !hasCallbackCredential
+      ? 'This email link is incomplete or expired. Request a new sign-in link.'
+      : !isLoading && tokenHash && !otpType
+        ? 'This email link is missing its verification type. Request a new link.'
+        : null;
   const displayedError = errorMessage ?? callbackError;
 
   useEffect(() => {
     if (isLoading || hasHandledCallback.current) return;
+    if (authError || errorCode || (!code && !tokenHash)) return;
+    if (tokenHash && !otpType) return;
+
     hasHandledCallback.current = true;
 
-    if (authError || errorCode || !code) return;
-
-    const completeConfirmation = async () => {
+    const completeSignIn = async () => {
       const client = getSupabaseClient();
-      const { error } = await client.auth.exchangeCodeForSession(code);
-      if (error) throw error;
+      let session: Session | null;
+      if (code) {
+        const { data, error } = await client.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        session = data.session;
+      } else {
+        if (!tokenHash || !otpType) {
+          throw new Error('This email link is missing its verification details.');
+        }
+        const { data, error } = await client.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: otpType,
+        });
+        if (error) throw error;
+        session = data.session;
+      }
 
-      const { error: signOutError } = await client.auth.signOut({ scope: 'local' });
-      if (signOutError) throw signOutError;
+      if (!session) {
+        throw new Error('The email link was accepted, but no sign-in session was created.');
+      }
 
-      router.replace('/sign-in?confirmed=1');
+      router.replace('/(tabs)');
     };
 
-    completeConfirmation().catch((error: unknown) => {
+    completeSignIn().catch((error: unknown) => {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : 'We could not confirm your email. Request a new confirmation link.',
+          : 'We could not verify this email link. Request a new sign-in link.',
       );
     });
-  }, [authError, code, errorCode, isLoading, router]);
+  }, [authError, code, errorCode, isLoading, otpType, router, tokenHash]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.content}>
         {displayedError ? (
           <>
-            <Text style={styles.title}>Could not confirm email</Text>
+            <Text style={styles.title}>Could not sign in</Text>
             <Text accessibilityLiveRegion="polite" style={styles.message}>
               {displayedError}
             </Text>
@@ -72,9 +95,9 @@ export default function AuthCallbackScreen() {
           </>
         ) : (
           <>
-            <ActivityIndicator size="large" color="#208AEF" />
-            <Text style={styles.title}>Confirming your email</Text>
-            <Text style={styles.message}>Please wait while we verify your confirmation link.</Text>
+            <ActivityIndicator size="large" color={DashboardColors.primary} />
+            <Text style={styles.title}>Verifying your email</Text>
+            <Text style={styles.message}>Please wait while we securely sign you in.</Text>
           </>
         )}
       </View>
@@ -82,10 +105,14 @@ export default function AuthCallbackScreen() {
   );
 }
 
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F4F7FB',
+    backgroundColor: DashboardColors.pale,
   },
   content: {
     flex: 1,
@@ -94,14 +121,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
   },
   title: {
-    color: '#14243A',
+    color: DashboardColors.dark,
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
     marginTop: 20,
   },
   message: {
-    color: '#667085',
+    color: DashboardColors.neutral,
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
@@ -113,11 +140,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 22,
     borderRadius: 12,
-    backgroundColor: '#208AEF',
+    backgroundColor: DashboardColors.primary,
     marginTop: 24,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: DashboardColors.white,
     fontSize: 15,
     fontWeight: '700',
   },
