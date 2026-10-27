@@ -1,6 +1,6 @@
-import type { Session } from '@supabase/supabase-js';
-import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
+import { createClient, type Session } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
+import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 
 import { getSupabaseClient, isSupabaseConfigured } from '@/utils/supabase';
 
@@ -11,6 +11,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<boolean>;
   signOut: () => Promise<void>;
+  verifyPassword: (password: string) => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -84,9 +85,42 @@ export function AuthProvider({ children }: PropsWithChildren) {
     if (error) throw error;
   }, []);
 
+  /**
+   * Checks the current user's password without touching the real session.
+   * A throwaway client (no storage, no auto-refresh) signs in with the same
+   * email, so the main client's session and auth listener are never affected.
+   * Resolves false for a wrong password; throws for network/other errors.
+   */
+  const verifyPassword = useCallback(
+    async (password: string) => {
+      const email = session?.user.email;
+      const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+      if (!email || !url || !key) {
+        throw new Error('Unable to verify your password right now.');
+      }
+
+      const verifier = createClient(url, key, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          storageKey: 'inkeeper-password-check',
+        },
+      });
+      const { error } = await verifier.auth.signInWithPassword({ email, password });
+      if (!error) return true;
+      if (error.code === 'invalid_credentials' || /invalid login credentials/i.test(error.message)) {
+        return false;
+      }
+      throw error;
+    },
+    [session],
+  );
+
   return (
     <AuthContext.Provider
-      value={{ session, isLoading, initializationError, signIn, signUp, signOut }}>
+      value={{ session, isLoading, initializationError, signIn, signUp, signOut, verifyPassword }}>
       {children}
     </AuthContext.Provider>
   );

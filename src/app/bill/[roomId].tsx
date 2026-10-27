@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 
 import BillStatement from '@/components/BillStatement';
-import { useBills } from '@/contexts/BillsContext';
+import PasswordPromptModal from '@/components/PasswordPromptModal';
+import { useBills, type BillStatus } from '@/contexts/BillsContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import { buildBillText, currentPeriod, periodLabel, shiftPeriod } from '@/utils/billing';
 
@@ -36,6 +37,7 @@ export default function TenantBillScreen() {
       ? requestedPeriod
       : maxPeriod;
   const [period, setPeriod] = useState(initialPeriod);
+  const [passwordPromptVisible, setPasswordPromptVisible] = useState(false);
 
   if (!room || !isOccupied(room)) {
     return (
@@ -50,6 +52,20 @@ export default function TenantBillScreen() {
   const record = getBill(room.id, period);
   const canGoBack = period > minPeriod;
   const canGoForward = period < maxPeriod;
+
+  // Marking a bill PAID needs the sign-in password; switching back to UNPAID does not.
+  const handleChangeStatus = (status: BillStatus) => {
+    if (status === 'paid') {
+      if (record.status !== 'paid') setPasswordPromptVisible(true);
+      return;
+    }
+    setStatus(room.id, period, status);
+  };
+
+  const handlePasswordVerified = () => {
+    setPasswordPromptVisible(false);
+    setStatus(room.id, period, 'paid');
+  };
 
   const handleShare = async () => {
     try {
@@ -115,7 +131,7 @@ export default function TenantBillScreen() {
           room={room}
           record={record}
           onChangeElectricity={(text) => setElectricity(room.id, period, text)}
-          onChangeStatus={(status) => setStatus(room.id, period, status)}
+          onChangeStatus={handleChangeStatus}
         />
 
         <Pressable style={styles.shareButton} onPress={handleShare}>
@@ -123,6 +139,12 @@ export default function TenantBillScreen() {
           <Text style={styles.shareText}>Share bill</Text>
         </Pressable>
       </ScrollView>
+
+      <PasswordPromptModal
+        visible={passwordPromptVisible}
+        onCancel={() => setPasswordPromptVisible(false)}
+        onVerified={handlePasswordVerified}
+      />
     </KeyboardAvoidingView>
   );
 }
