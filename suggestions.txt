@@ -1,0 +1,24 @@
+to be fixed:
+
+
+update recommendation:
+## Future Enhancement: Room-Specific Billing Charge Overrides
+
+**Status:** Deferred — not included in the current implementation.
+
+### Current behavior
+The current implementation uses one set of owner-level defaults shared across all boarding houses.
+
+### Proposed future behavior
+Allow owners to override default water, Wi-Fi, trash, and electricity rates for individual rooms. The current implementation uses one set of owner-level defaults shared across all boarding houses.
+
+### Considerations before implementation
+- Decide which charge types can be overridden per room.
+- Define whether an unset room-specific value inherits the global default.
+- Determine how the trigger selects the applicable charge.
+- Preserve previously generated bill amounts when defaults or overrides change.
+- Review the existing schema, trigger functions, and Row Level Security policies before introducing changes.
+- Design a room-level configuration interface that integrates with the existing room management screen.
+
+### Current scope restriction
+Do not implement room-specific overrides, add database columns for them, or modify the existing trigger to support them as part of the current Billing Charges screen update.

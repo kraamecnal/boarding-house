@@ -1,3 +1,0 @@
-1. confirmation email from user email leads to blank unresponsive 
-    website page
-2. Detail out the "About" and "Version" tabs found in settings panel

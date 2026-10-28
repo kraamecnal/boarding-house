@@ -66,7 +66,6 @@ export default function ManageScreen() {
           title="Upcoming monthly due dates"
           items={upcoming}
           emptyMessage="No upcoming due dates yet."
-          onSeeAll={() => router.push('/billing-charges')}
           onItemPress={(item) =>
             router.push(`/bill/${item.room.id}?period=${item.period}`)
           }
@@ -75,7 +74,6 @@ export default function ManageScreen() {
           title="Unpaid tenants"
           items={overdue}
           emptyMessage="No unpaid overdue bills."
-          onSeeAll={() => router.push('/billing-charges')}
           onItemPress={(item) =>
             router.push(`/bill/${item.room.id}?period=${item.period}`)
           }
@@ -91,33 +89,23 @@ function DashboardSection({
   title,
   items,
   emptyMessage,
-  onSeeAll,
   onItemPress,
 }: {
   title: string;
   items: DueItem[];
   emptyMessage: string;
-  onSeeAll: () => void;
   onItemPress: (item: DueItem) => void;
 }) {
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeading}>
         <Text style={styles.sectionTitle}>{title}</Text>
-        {items.length > 0 && (
-          <Pressable
-            accessibilityRole="button"
-            onPress={onSeeAll}
-            style={styles.seeAllButton}>
-            <Text style={styles.seeAllText}>See all</Text>
-          </Pressable>
-        )}
       </View>
       <View style={styles.sectionCard}>
         {items.length === 0 ? (
           <Text style={styles.emptyMessage}>{emptyMessage}</Text>
         ) : (
-          items.slice(0, 2).map((item) => (
+          items.map((item) => (
             <Pressable
               accessibilityRole="button"
               key={item.key}
@@ -134,12 +122,6 @@ function DashboardSection({
               <Text style={styles.amount}>{formatPeso(item.total)}</Text>
             </Pressable>
           ))
-        )}
-        {items.length > 2 && (
-          <Pressable accessibilityRole="button" onPress={onSeeAll} style={styles.moreLink}>
-            <Text style={styles.seeAllText}>View {items.length - 2} more</Text>
-            <Ionicons color={DashboardColors.primary} name="arrow-forward" size={15} />
-          </Pressable>
         )}
       </View>
     </View>
@@ -191,15 +173,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  seeAllButton: {
-    paddingVertical: 4,
-    paddingLeft: 8,
-  },
-  seeAllText: {
-    color: DashboardColors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
   sectionCard: {
     minHeight: 132,
     justifyContent: 'center',
@@ -244,12 +217,5 @@ const styles = StyleSheet.create({
     color: DashboardColors.dark,
     fontSize: 13,
     fontWeight: '700',
-  },
-  moreLink: {
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    gap: 6,
   },
 });
