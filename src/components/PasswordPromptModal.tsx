@@ -1,15 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,11 +18,13 @@ const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 30;
 
 type Props = {
+  visible: boolean;
   onCancel: () => void;
   onVerified: () => void;
 };
 
-export default function PasswordPromptModal({ onCancel, onVerified }: Props) {
+/** Asks for the payment password (created in Profile) before a bill is marked PAID. */
+export default function PasswordPromptModal({ visible, onCancel, onVerified }: Props) {
   const { verifyPassword } = useAuth();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,14 +32,19 @@ export default function PasswordPromptModal({ onCancel, onVerified }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
-  const [now, setNow] = useState(0);
+  const [now, setNow] = useState(Date.now());
 
-  const secondsLeft = lockedUntil
-    ? Math.max(0, Math.ceil((lockedUntil - now) / 1000))
-    : 0;
+  const secondsLeft = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - now) / 1000)) : 0;
   const isLocked = secondsLeft > 0;
 
-  // Counts down the lock, then lets the person try again.
+  useEffect(() => {
+    if (!visible) {
+      setPassword('');
+      setShowPassword(false);
+      setError(null);
+    }
+  }, [visible]);
+
   useEffect(() => {
     if (!lockedUntil) return;
     const timer = setInterval(() => {
@@ -79,10 +86,10 @@ export default function PasswordPromptModal({ onCancel, onVerified }: Props) {
         caught instanceof Error && caught.name === 'AuthRetryableFetchError';
       setError(
         isConnectionProblem
-          ? "Couldn't verify. Check your connection and try again."
+          ? "Couldn't reach the server. Check your connection and try again."
           : caught instanceof Error
             ? caught.message
-            : "Couldn't verify your password. Try again.",
+            : 'Something went wrong. Try again.',
       );
     } finally {
       setIsVerifying(false);
@@ -94,19 +101,19 @@ export default function PasswordPromptModal({ onCancel, onVerified }: Props) {
   };
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={handleCancel}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleCancel}>
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.card}>
           <Text style={styles.title}>Confirm payment</Text>
           <Text style={styles.subtitle}>
-            Enter your sign-in password to mark this bill as paid.
+            Enter your payment password to mark this bill as paid.
           </Text>
 
           <View style={styles.inputWrap}>
             <TextInput
-              accessibilityLabel="Password"
+              accessibilityLabel="Payment password"
               autoCapitalize="none"
               autoComplete="current-password"
               autoCorrect={false}
@@ -116,7 +123,7 @@ export default function PasswordPromptModal({ onCancel, onVerified }: Props) {
                 if (error) setError(null);
               }}
               onSubmitEditing={handleConfirm}
-              placeholder="Password"
+              placeholder="Payment password"
               placeholderTextColor="#98A2B3"
               returnKeyType="go"
               secureTextEntry={!showPassword}
@@ -194,11 +201,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#FFFFFF',
   },
-  title: {
-    color: '#14243A',
-    fontSize: 20,
-    fontWeight: '700',
-  },
+  title: { color: '#14243A', fontSize: 20, fontWeight: '700' },
   subtitle: {
     color: '#667085',
     fontSize: 14,
@@ -218,27 +221,13 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minHeight: 48,
-    paddingLeft: 14,
+    paddingHorizontal: 14,
     color: '#14243A',
     fontSize: 15,
   },
-  eyeButton: {
-    width: 46,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  error: {
-    color: '#B42318',
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 10,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 20,
-  },
+  eyeButton: { width: 46, height: 48, alignItems: 'center', justifyContent: 'center' },
+  error: { color: '#B42318', fontSize: 13, lineHeight: 19, marginTop: 10 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 20 },
   button: {
     flex: 1,
     minHeight: 48,
@@ -246,23 +235,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 12,
   },
-  cancelButton: {
-    backgroundColor: '#F2F5F9',
-  },
-  cancelText: {
-    color: '#344054',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  confirmButton: {
-    backgroundColor: '#208AEF',
-  },
-  confirmDisabled: {
-    opacity: 0.5,
-  },
-  confirmText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  cancelButton: { backgroundColor: '#F2F5F9' },
+  cancelText: { color: '#344054', fontSize: 15, fontWeight: '600' },
+  confirmButton: { backgroundColor: '#208AEF' },
+  confirmDisabled: { opacity: 0.5 },
+  confirmText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

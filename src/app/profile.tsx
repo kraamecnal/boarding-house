@@ -3,12 +3,15 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import SetPasswordModal from '@/components/SetPasswordModal';
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { session, signOut } = useAuth();
+  const { session, signOut, hasPaymentPassword } = useAuth();
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const email = session?.user.email ?? 'No email available';
@@ -42,6 +45,31 @@ export default function ProfileScreen() {
 
       <Pressable
         accessibilityRole="button"
+        onPress={() => {
+          setPasswordSaved(false);
+          setPasswordModalVisible(true);
+        }}
+        style={styles.row}>
+        <View style={styles.rowCopy}>
+          <Text style={styles.rowTitle}>
+            {hasPaymentPassword ? 'Change payment password' : 'Set payment password'}
+          </Text>
+          <Text style={styles.rowDescription}>
+            {hasPaymentPassword
+              ? 'Required to mark bills as paid'
+              : 'Not set yet. Required to mark bills as paid'}
+          </Text>
+        </View>
+        <Ionicons color={DashboardColors.neutral} name="chevron-forward" size={20} />
+      </Pressable>
+      {passwordSaved && (
+        <Text accessibilityLiveRegion="polite" style={styles.success}>
+          Payment password saved.
+        </Text>
+      )}
+
+      <Pressable
+        accessibilityRole="button"
         onPress={() => router.push('/settings')}
         style={styles.row}>
         <View style={styles.rowCopy}>
@@ -63,6 +91,15 @@ export default function ProfileScreen() {
           <Text style={styles.signOutLabel}>Sign out</Text>
         )}
       </Pressable>
+
+      <SetPasswordModal
+        visible={passwordModalVisible}
+        onClose={() => setPasswordModalVisible(false)}
+        onSaved={() => {
+          setPasswordModalVisible(false);
+          setPasswordSaved(true);
+        }}
+      />
     </ScrollView>
   );
 }
@@ -128,6 +165,10 @@ const styles = StyleSheet.create({
   },
   error: {
     color: '#B42318',
+    fontSize: 14,
+  },
+  success: {
+    color: '#067647',
     fontSize: 14,
   },
   signOut: {

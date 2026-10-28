@@ -13,6 +13,9 @@ type AuthContextValue = {
   initializationError: string | null;
   requestMagicLink: (email: string, mode: AuthMode) => Promise<void>;
   signOut: () => Promise<void>;
+  /** True once the user has created the password that confirms bill payments. */
+  hasPaymentPassword: boolean;
+  setPaymentPassword: (password: string) => Promise<void>;
   verifyPassword: (password: string) => Promise<boolean>;
 };
 
@@ -157,6 +160,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [session],
   );
 
+  // Sign-in is passwordless (magic link), so the payment password is a separate
+  // credential the user creates once. A flag in user_metadata tells us it exists.
+  const hasPaymentPassword = session?.user.user_metadata?.payment_password_set === true;
+
+  const setPaymentPassword = useCallback(async (password: string) => {
+    const { error } = await getSupabaseClient().auth.updateUser({
+      password,
+      data: { payment_password_set: true },
+    });
+    if (error) throw error;
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -165,6 +180,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
         initializationError,
         requestMagicLink,
         signOut,
+        hasPaymentPassword,
+        setPaymentPassword,
         verifyPassword,
       }}>
       {children}

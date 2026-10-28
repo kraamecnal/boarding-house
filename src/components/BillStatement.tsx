@@ -67,6 +67,7 @@ export default function BillStatement({
               placeholder="0.00"
               placeholderTextColor="#8A94A6"
               selectTextOnFocus
+              editable={record.status !== 'paid'}
               maxLength={10}
               accessibilityLabel="Electricity charge in pesos"
             />

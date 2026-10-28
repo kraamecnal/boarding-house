@@ -43,7 +43,7 @@ function AppNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
         <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
-        <Stack.Screen name="billing-charges" options={{ title: 'Billing Charges' }} />
+        <Stack.Screen name="billing-charges" options={{ title: 'Billing charges' }} />
         <Stack.Screen name="profile" options={{ title: 'Profile' }} />
         <Stack.Screen
           name="register-house"
@@ -54,6 +54,7 @@ function AppNavigator() {
           name="bh/[id]/room/new"
           options={{ title: 'Register Room', presentation: 'modal' }}
         />
+        <Stack.Screen name="bh/[id]/room/[roomId]/index" options={{ title: 'Room' }} />
         <Stack.Screen
           name="bh/[id]/room/[roomId]/tenant"
           options={{ title: 'Register Tenant', presentation: 'modal' }}

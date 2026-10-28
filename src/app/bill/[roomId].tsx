@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   Alert,
@@ -15,9 +15,16 @@ import {
 
 import BillStatement from '@/components/BillStatement';
 import PasswordPromptModal from '@/components/PasswordPromptModal';
+import { useAuth } from '@/contexts/AuthContext';
 import { useBills, type BillStatus } from '@/contexts/BillsContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
-import { buildBillText, currentPeriod, periodLabel, shiftPeriod } from '@/utils/billing';
+import {
+  buildBillText,
+  computeTotals,
+  currentPeriod,
+  periodLabel,
+  shiftPeriod,
+} from '@/utils/billing';
 
 export default function TenantBillScreen() {
   const params = useLocalSearchParams<{ roomId: string; period?: string }>();
@@ -26,6 +33,8 @@ export default function TenantBillScreen() {
 
   const { getRoomById } = useRooms();
   const { getBill, setElectricity, setStatus } = useBills();
+  const { hasPaymentPassword } = useAuth();
+  const router = useRouter();
   const room = roomId ? getRoomById(roomId) : undefined;
 
   const minPeriod = room && isOccupied(room) ? room.tenant.startDate.slice(0, 7) : currentPeriod();
@@ -53,10 +62,22 @@ export default function TenantBillScreen() {
   const canGoBack = period > minPeriod;
   const canGoForward = period < maxPeriod;
 
-  // Marking a bill PAID needs the sign-in password; switching back to UNPAID does not.
+  // Marking a bill PAID needs the payment password (set in Profile); UNPAID does not.
   const handleChangeStatus = (status: BillStatus) => {
     if (status === 'paid') {
-      if (record.status !== 'paid') setPasswordPromptVisible(true);
+      if (record.status === 'paid') return;
+      if (!hasPaymentPassword) {
+        Alert.alert(
+          'Set a payment password first',
+          'Marking a bill as paid needs a payment password. You can set one in your Profile.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Profile', onPress: () => router.push('/profile') },
+          ],
+        );
+        return;
+      }
+      setPasswordPromptVisible(true);
       return;
     }
     setStatus(room.id, period, status);
@@ -64,7 +85,12 @@ export default function TenantBillScreen() {
 
   const handlePasswordVerified = () => {
     setPasswordPromptVisible(false);
-    setStatus(room.id, period, 'paid');
+    const totals = computeTotals(room.monthlyRate, record.electricity);
+    setStatus(room.id, period, 'paid', {
+      roomRent: totals.roomRent,
+      electricity: totals.electricity,
+      total: totals.total,
+    });
   };
 
   const handleShare = async () => {
@@ -140,12 +166,13 @@ export default function TenantBillScreen() {
         </Pressable>
       </ScrollView>
 
-      {passwordPromptVisible ? (
+      {passwordPromptVisible && (
         <PasswordPromptModal
+          visible
           onCancel={() => setPasswordPromptVisible(false)}
           onVerified={handlePasswordVerified}
         />
-      ) : null}
+      )}
     </KeyboardAvoidingView>
   );
 }
