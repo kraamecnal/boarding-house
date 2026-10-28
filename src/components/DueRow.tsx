@@ -28,13 +28,14 @@ function toneFor(days: number) {
 
 export default function DueRow({ item, houseName, onPress }: Props) {
   const { room, period, dueDate, daysUntilDue, total, electricityEntered } = item;
+  const { tenant } = room;
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${room.roomName}, ${room.firstName} ${room.lastName}, ${dueText(daysUntilDue)}`}
+      accessibilityLabel={`${room.roomName}, ${tenant.firstName} ${tenant.lastName}, ${dueText(daysUntilDue)}`}
     >
       <View style={styles.header}>
         <View style={styles.titles}>
@@ -42,7 +43,7 @@ export default function DueRow({ item, houseName, onPress }: Props) {
             {houseName} · {room.roomName}
           </Text>
           <Text style={styles.name}>
-            {room.firstName} {room.lastName}
+            {tenant.firstName} {tenant.lastName}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={22} color="#8A94A6" />

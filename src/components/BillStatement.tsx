@@ -2,12 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { BillRecord, BillStatus } from '@/contexts/BillsContext';
-import type { Room } from '@/contexts/RoomsContext';
+import type { OccupiedRoom } from '@/contexts/RoomsContext';
 import { FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
 import { computeTotals, formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
 
 type Props = {
-  room: Room;
+  room: OccupiedRoom;
   record: BillRecord;
   onChangeElectricity: (text: string) => void;
   onChangeStatus: (status: BillStatus) => void;
@@ -19,7 +19,7 @@ export default function BillStatement({
   onChangeElectricity,
   onChangeStatus,
 }: Props) {
-  const totals = computeTotals(room.monthlyRent, record.electricity);
+  const totals = computeTotals(room.monthlyRate, record.electricity);
 
   return (
     <View style={styles.sheet}>
@@ -29,9 +29,9 @@ export default function BillStatement({
 
       <View style={styles.block}>
         <Field label="Room No." value={room.roomName} />
-        <Field label="Tenant Name" value={`${room.firstName} ${room.lastName}`} />
-        <Field label="Contact" value={room.contactNumber} />
-        <Field label="Email" value={room.email} />
+        <Field label="Tenant Name" value={`${room.tenant.firstName} ${room.tenant.lastName}`} />
+        <Field label="Contact" value={room.tenant.contactNumber} />
+        <Field label="Email" value={room.tenant.email} />
       </View>
 
       <Rule />

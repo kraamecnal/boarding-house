@@ -5,7 +5,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import AnimatedFAB from '@/components/AnimatedFAB';
 import { useBills } from '@/contexts/BillsContext';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
-import { useRooms } from '@/contexts/RoomsContext';
+import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import { computeTotals, currentPeriod, formatPeso, periodLabel } from '@/utils/billing';
 
 export default function BoardingHouseScreen() {
@@ -14,7 +14,7 @@ export default function BoardingHouseScreen() {
   const { getHouseById } = useBoardingHouses();
   const house = getHouseById(id as string);
   const { getRoomsForHouse } = useRooms();
-  const { records, getBill } = useBills(); 
+  const { records, getBill } = useBills();
 
   if (!house) {
     return (
@@ -26,6 +26,7 @@ export default function BoardingHouseScreen() {
   }
 
   const rooms = getRoomsForHouse(id as string);
+  const occupiedCount = rooms.filter((room) => room.status === 'occupied').length;
   const period = currentPeriod();
 
   return (
@@ -34,18 +35,44 @@ export default function BoardingHouseScreen() {
 
       {rooms.length === 0 ? (
         <Text style={styles.emptyText}>
-          No tenants registered yet for {house.name}.{'\n'}Tap the + button to add one.
+          No rooms registered yet for {house.name}.{'\n'}Tap the + button to add one.
         </Text>
       ) : (
         <FlatList
-          ListHeaderComponent={<Text style={styles.houseAddress}>{house.address}</Text>}
+          ListHeaderComponent={
+            <View style={styles.header}>
+              <Text style={styles.houseAddress}>{house.address}</Text>
+              <Text style={styles.houseSummary}>
+                {rooms.length} {rooms.length === 1 ? 'room' : 'rooms'} · {occupiedCount} occupied
+              </Text>
+            </View>
+          }
           data={rooms}
-          extraData={records} 
+          extraData={records}
           keyExtractor={(room) => room.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
+            if (!isOccupied(item)) {
+              return (
+                <Pressable
+                  onPress={() => router.push(`/bh/${id}/room/${item.id}/tenant`)}
+                  style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.roomName} is vacant. Register a tenant.`}
+                >
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.roomTitle}>{item.roomName}</Text>
+                    <StatusBadge occupied={false} />
+                  </View>
+                  <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
+                  <Text style={styles.cta}>Tap to register a tenant</Text>
+                </Pressable>
+              );
+            }
+
+            const { tenant } = item;
             const record = getBill(item.id, period);
-            const totals = computeTotals(item.monthlyRent, record.electricity);
+            const totals = computeTotals(item.monthlyRate, record.electricity);
             const isPaid = record.status === 'paid';
 
             return (
@@ -53,25 +80,25 @@ export default function BoardingHouseScreen() {
                 onPress={() => router.push(`/bill/${item.id}`)}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`Open monthly bill for ${item.roomName}, ${item.firstName} ${item.lastName}`}
+                accessibilityLabel={`Open monthly bill for ${item.roomName}, ${tenant.firstName} ${tenant.lastName}`}
               >
                 <View style={styles.cardHeader}>
-                  <View style={styles.cardTitles}>
-                    <Text style={styles.roomName}>{item.roomName}</Text>
-                    <Text style={styles.tenantName}>
-                      {item.firstName} {item.lastName}
-                    </Text>
-                  </View>
+                  <Text style={styles.roomTitle}>{item.roomName}</Text>
+                  <StatusBadge occupied />
+                </View>
+
+                <View style={styles.tenantRow}>
+                  <Text style={styles.tenantName}>
+                    {tenant.firstName} {tenant.lastName}
+                  </Text>
                   <Ionicons name="chevron-forward" size={22} color="#8A94A6" />
                 </View>
 
-                <Text style={styles.cardLine}>{item.email}</Text>
-                <Text style={styles.cardLine}>{item.contactNumber}</Text>
+                <Text style={styles.cardLine}>{tenant.email}</Text>
+                <Text style={styles.cardLine}>{tenant.contactNumber}</Text>
+                <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
                 <Text style={styles.cardLine}>
-                  ₱{item.monthlyRent.toLocaleString()} / month
-                </Text>
-                <Text style={styles.cardLine}>
-                  {item.startDate} → {item.dueDate}
+                  {tenant.startDate} → {tenant.dueDate}
                 </Text>
 
                 <View style={styles.billRow}>
@@ -90,18 +117,25 @@ export default function BoardingHouseScreen() {
         />
       )}
 
-      <AnimatedFAB onPress={() => router.push(`/bh/${id}/room/new`)} />
+      <AnimatedFAB
+        onPress={() => router.push(`/bh/${id}/room/new`)}
+        accessibilityLabel="Register a new room"
+      />
+    </View>
+  );
+}
+
+function StatusBadge({ occupied }: { occupied: boolean }) {
+  return (
+    <View style={[styles.badge, occupied ? styles.badgeOccupied : styles.badgeVacant]}>
+      <Text style={[styles.badgeText, occupied ? styles.badgeTextOccupied : styles.badgeTextVacant]}>
+        {occupied ? 'Occupied' : 'Vacant'}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  houseAddress: {
-  fontSize: 14,
-  color: '#6B7280',
-  marginBottom: 4,
-  },
-
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
@@ -117,7 +151,21 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+    paddingBottom: 110, // keeps the last card clear of the FAB
     gap: 12,
+  },
+  header: {
+    marginBottom: 4,
+    gap: 2,
+  },
+  houseAddress: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  houseSummary: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1A2B3C',
   },
   card: {
     backgroundColor: 'white',
@@ -137,24 +185,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
   },
-  cardTitles: {
-    flex: 1,
-  },
-  roomName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  tenantName: {
+  roomTitle: {
     fontSize: 17,
     fontWeight: '700',
+    color: '#1A2B3C',
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  badgeVacant: { backgroundColor: '#F2F4F7' },
+  badgeOccupied: { backgroundColor: '#DBEAFE' },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+  badgeTextVacant: { color: '#475467' },
+  badgeTextOccupied: { color: '#1D4ED8' },
+  tenantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  tenantName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
     color: '#1A2B3C',
   },
   cardLine: {
     fontSize: 14,
     color: '#555',
+  },
+  cta: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2563EB',
   },
   billRow: {
     marginTop: 10,

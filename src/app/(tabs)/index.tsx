@@ -29,7 +29,9 @@ export default function BoardingHousesScreen() {
           </Text>
         }
         renderItem={({ item }) => {
-          const tenantCount = getRoomsForHouse(item.id).length;
+          const houseRooms = getRoomsForHouse(item.id);
+          const roomCount = houseRooms.length;
+          const occupiedCount = houseRooms.filter((room) => room.status === 'occupied').length;
           return (
             <Pressable
               onPress={() => router.push(`/bh/${item.id}`)}
@@ -41,7 +43,7 @@ export default function BoardingHousesScreen() {
                 <Text style={styles.houseName}>{item.name}</Text>
                 <Text style={styles.address}>{item.address}</Text>
                 <Text style={styles.tenants}>
-                  {tenantCount} {tenantCount === 1 ? 'tenant' : 'tenants'}
+                  {roomCount} {roomCount === 1 ? 'room' : 'rooms'} · {occupiedCount} occupied
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={22} color="#8A94A6" />

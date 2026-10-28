@@ -14,8 +14,9 @@ import {
 } from 'react-native';
 
 import BillStatement from '@/components/BillStatement';
-import { useBills } from '@/contexts/BillsContext';
-import { useRooms } from '@/contexts/RoomsContext';
+import PasswordPromptModal from '@/components/PasswordPromptModal';
+import { useBills, type BillStatus } from '@/contexts/BillsContext';
+import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import { buildBillText, currentPeriod, periodLabel, shiftPeriod } from '@/utils/billing';
 
 export default function TenantBillScreen() {
@@ -27,7 +28,7 @@ export default function TenantBillScreen() {
   const { getBill, setElectricity, setStatus } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
 
-  const minPeriod = room ? room.startDate.slice(0, 7) : currentPeriod();
+  const minPeriod = room && isOccupied(room) ? room.tenant.startDate.slice(0, 7) : currentPeriod();
   const thisMonth = currentPeriod();
   const maxPeriod = thisMonth >= minPeriod ? thisMonth : minPeriod;
 
@@ -36,11 +37,14 @@ export default function TenantBillScreen() {
       ? requestedPeriod
       : maxPeriod;
   const [period, setPeriod] = useState(initialPeriod);
+  const [passwordPromptVisible, setPasswordPromptVisible] = useState(false);
 
-  if (!room) {
+  if (!room || !isOccupied(room)) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.emptyText}>Tenant not found.</Text>
+        <Text style={styles.emptyText}>
+          {room ? 'This room has no tenant yet.' : 'Tenant not found.'}
+        </Text>
       </View>
     );
   }
@@ -48,6 +52,20 @@ export default function TenantBillScreen() {
   const record = getBill(room.id, period);
   const canGoBack = period > minPeriod;
   const canGoForward = period < maxPeriod;
+
+  // Marking a bill PAID needs the sign-in password; switching back to UNPAID does not.
+  const handleChangeStatus = (status: BillStatus) => {
+    if (status === 'paid') {
+      if (record.status !== 'paid') setPasswordPromptVisible(true);
+      return;
+    }
+    setStatus(room.id, period, status);
+  };
+
+  const handlePasswordVerified = () => {
+    setPasswordPromptVisible(false);
+    setStatus(room.id, period, 'paid');
+  };
 
   const handleShare = async () => {
     try {
@@ -113,7 +131,7 @@ export default function TenantBillScreen() {
           room={room}
           record={record}
           onChangeElectricity={(text) => setElectricity(room.id, period, text)}
-          onChangeStatus={(status) => setStatus(room.id, period, status)}
+          onChangeStatus={handleChangeStatus}
         />
 
         <Pressable style={styles.shareButton} onPress={handleShare}>
@@ -121,6 +139,13 @@ export default function TenantBillScreen() {
           <Text style={styles.shareText}>Share bill</Text>
         </Pressable>
       </ScrollView>
+
+      {passwordPromptVisible ? (
+        <PasswordPromptModal
+          onCancel={() => setPasswordPromptVisible(false)}
+          onVerified={handlePasswordVerified}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
