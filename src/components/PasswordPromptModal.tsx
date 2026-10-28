@@ -18,12 +18,11 @@ const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 30;
 
 type Props = {
-  visible: boolean;
   onCancel: () => void;
   onVerified: () => void;
 };
 
-export default function PasswordPromptModal({ visible, onCancel, onVerified }: Props) {
+export default function PasswordPromptModal({ onCancel, onVerified }: Props) {
   const { verifyPassword } = useAuth();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -31,19 +30,12 @@ export default function PasswordPromptModal({ visible, onCancel, onVerified }: P
   const [error, setError] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(0);
 
-  const secondsLeft = lockedUntil ? Math.max(0, Math.ceil((lockedUntil - now) / 1000)) : 0;
+  const secondsLeft = lockedUntil
+    ? Math.max(0, Math.ceil((lockedUntil - now) / 1000))
+    : 0;
   const isLocked = secondsLeft > 0;
-
-  // Never keep the password around after the prompt closes.
-  useEffect(() => {
-    if (!visible) {
-      setPassword('');
-      setShowPassword(false);
-      setError(null);
-    }
-  }, [visible]);
 
   // Counts down the lock, then lets the person try again.
   useEffect(() => {
@@ -102,7 +94,7 @@ export default function PasswordPromptModal({ visible, onCancel, onVerified }: P
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleCancel}>
+    <Modal visible transparent animationType="fade" onRequestClose={handleCancel}>
       <KeyboardAvoidingView
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

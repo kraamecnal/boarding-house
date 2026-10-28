@@ -140,11 +140,12 @@ export default function TenantBillScreen() {
         </Pressable>
       </ScrollView>
 
-      <PasswordPromptModal
-        visible={passwordPromptVisible}
-        onCancel={() => setPasswordPromptVisible(false)}
-        onVerified={handlePasswordVerified}
-      />
+      {passwordPromptVisible ? (
+        <PasswordPromptModal
+          onCancel={() => setPasswordPromptVisible(false)}
+          onVerified={handlePasswordVerified}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }

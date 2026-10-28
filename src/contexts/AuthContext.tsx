@@ -1,15 +1,17 @@
 import { createClient, type Session } from '@supabase/supabase-js';
 import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
+import { Platform } from 'react-native';
 
 import { getSupabaseClient, isSupabaseConfigured } from '@/utils/supabase';
+
+export type AuthMode = 'sign-in' | 'sign-up';
 
 type AuthContextValue = {
   session: Session | null;
   isLoading: boolean;
   initializationError: string | null;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<boolean>;
+  requestMagicLink: (email: string, mode: AuthMode) => Promise<void>;
   signOut: () => Promise<void>;
   verifyPassword: (password: string) => Promise<boolean>;
 };
@@ -58,27 +60,64 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await getSupabaseClient().auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  }, []);
+  const requestMagicLink = useCallback(async (email: string, mode: AuthMode) => {
+  const configuredRedirect = process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim();
+  
+  if (Platform.OS === 'web' && !__DEV__ && !configuredRedirect) {
+    throw new Error(
+      'Set EXPO_PUBLIC_AUTH_REDIRECT_URL to your production web callback URL before sending sign-in links.',
+    );
+  }
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    const emailRedirectTo = Linking.createURL('auth/callback');
+
+  const emailRedirectTo = configuredRedirect || Linking.createURL('auth/callback');
+
+/* debugging snippet
+
+  // 1. CHOOSE THE RIGHT LINK FOR EXPO GO VS PRODUCTION
+  let emailRedirectTo = configuredRedirect;
+
+  if (!emailRedirectTo) {
     if (__DEV__) {
-      console.info('Supabase email confirmation redirect:', emailRedirectTo);
+      // 🔴 FORCE your exact Expo Go local IP network path:
+      emailRedirectTo = 'exp://192.168.100.207:8081/--/auth/callback?_notrack=1'; 
+    } else {
+      emailRedirectTo = Linking.createURL('auth/callback');
     }
+  }
 
-    const { data, error } = await getSupabaseClient().auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo,
-      },
-    });
-    if (error) throw error;
-    return Boolean(data.session);
-  }, []);
+
+  console.log("👉 ADD THIS EXACT STRING TO SUPABASE:", emailRedirectTo);
+
+ end of debugging snippet */
+
+
+
+
+  if (__DEV__) {
+    console.info('Supabase magic-link redirect URI:', emailRedirectTo);
+    if (!configuredRedirect) {
+      console.warn(
+        'EXPO_PUBLIC_AUTH_REDIRECT_URL is not set. Expo is using the current development callback; add that exact URI to Supabase Auth Redirect URLs.',
+      );
+    }
+  }
+
+  const { error } = await getSupabaseClient().auth.signInWithOtp({
+    email,
+    options: {
+      shouldCreateUser: mode === 'sign-up',
+      emailRedirectTo,
+    },
+  });
+  
+  if (error) throw error;
+}, []);
+
+
+
+
+
 
   const signOut = useCallback(async () => {
     const { error } = await getSupabaseClient().auth.signOut();
@@ -120,7 +159,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   return (
     <AuthContext.Provider
-      value={{ session, isLoading, initializationError, signIn, signUp, signOut, verifyPassword }}>
+      value={{
+        session,
+        isLoading,
+        initializationError,
+        requestMagicLink,
+        signOut,
+        verifyPassword,
+      }}>
       {children}
     </AuthContext.Provider>
   );
