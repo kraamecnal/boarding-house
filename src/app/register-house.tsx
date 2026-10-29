@@ -23,8 +23,11 @@ export default function NewBoardingHouseScreen() {
 
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
     const trimmedName = name.trim();
     const trimmedAddress = address.trim();
 
@@ -34,8 +37,16 @@ export default function NewBoardingHouseScreen() {
       return Alert.alert('Name already used', `A boarding house named "${trimmedName}" already exists.`);
     }
 
-    addHouse({ name: trimmedName, address: trimmedAddress });
-    router.back();
+    setSubmitError(null);
+    setIsSubmitting(true);
+    try {
+      await addHouse({ name: trimmedName, address: trimmedAddress });
+      router.back();
+    } catch (error: unknown) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not register this boarding house.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -70,8 +81,13 @@ export default function NewBoardingHouseScreen() {
           {address.length}/{MAX_ADDRESS}
         </Text>
 
+        {submitError && <Text accessibilityLiveRegion="polite" style={styles.error}>{submitError}</Text>}
         <View style={styles.submitWrapper}>
-          <AnimatedButton label="Register" onPress={handleSubmit} />
+          <AnimatedButton
+            disabled={isSubmitting}
+            label={isSubmitting ? 'Saving…' : 'Register'}
+            onPress={() => void handleSubmit()}
+          />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -108,6 +124,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     textAlign: 'right',
+  },
+  error: {
+    marginTop: 10,
+    color: '#B42318',
+    fontSize: 13,
   },
   submitWrapper: {
     marginTop: 28,

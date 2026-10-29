@@ -28,8 +28,11 @@ export default function NewRoomScreen() {
 
   const [roomName, setRoomName] = useState('');
   const [monthlyRate, setMonthlyRate] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
     if (!boardingHouseId) return;
     const trimmedName = roomName.trim();
     const rate = Number(monthlyRate);
@@ -45,8 +48,16 @@ export default function NewRoomScreen() {
       return Alert.alert('Missing info', 'Please enter a monthly rate greater than 0.');
     }
 
-    addRoom({ boardingHouseId, roomName: trimmedName, monthlyRate: rate });
-    router.back();
+    setSubmitError(null);
+    setIsSubmitting(true);
+    try {
+      await addRoom({ boardingHouseId, roomName: trimmedName, monthlyRate: rate });
+      router.back();
+    } catch (error: unknown) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not register this room.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -80,8 +91,13 @@ export default function NewRoomScreen() {
 
         <Text style={styles.note}>The room starts as Vacant. Tap it later to register a tenant.</Text>
 
+        {submitError && <Text accessibilityLiveRegion="polite" style={styles.error}>{submitError}</Text>}
         <View style={styles.submitWrapper}>
-          <AnimatedButton label="Register Room" onPress={handleSubmit} />
+          <AnimatedButton
+            disabled={isSubmitting}
+            label={isSubmitting ? 'Saving…' : 'Register Room'}
+            onPress={() => void handleSubmit()}
+          />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -119,6 +135,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: '#6B7280',
     fontSize: 12,
+  },
+  error: {
+    marginTop: 10,
+    color: '#B42318',
+    fontSize: 13,
   },
   submitWrapper: {
     marginTop: 28,

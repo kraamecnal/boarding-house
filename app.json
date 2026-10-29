@@ -28,7 +28,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to attach a valid ID."
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to attach tenant documents.",
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera to take tenant document photos."
         }
       ],
       [

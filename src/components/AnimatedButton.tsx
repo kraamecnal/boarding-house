@@ -6,9 +6,10 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 type AnimatedButtonProps = {
   label: string;
   onPress: () => void;
+  disabled?: boolean;
 };
 
-export default function AnimatedButton({ label, onPress }: AnimatedButtonProps) {
+export default function AnimatedButton({ label, onPress, disabled = false }: AnimatedButtonProps) {
   const scale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
@@ -29,10 +30,11 @@ export default function AnimatedButton({ label, onPress }: AnimatedButtonProps) 
 
   return (
     <AnimatedPressable
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
+      disabled={disabled}
+      onPressIn={disabled ? undefined : handlePressIn}
+      onPressOut={disabled ? undefined : handlePressOut}
       onPress={onPress}
-      style={[styles.button, { transform: [{ scale }] }]}
+      style={[styles.button, disabled && styles.buttonDisabled, { transform: [{ scale }] }]}
     >
       <Text style={styles.text}>{label}</Text>
     </AnimatedPressable>
@@ -51,6 +53,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 4,
     elevation: 3,
+  },
+  buttonDisabled: {
+    opacity: 0.65,
   },
   text: {
     color: '#FFFFFF',

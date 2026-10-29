@@ -1,4 +1,5 @@
 import type { BillStatus } from '@/contexts/BillsContext';
+import type { BillItem } from '@/contexts/BillsContext';
 import type { OccupiedRoom } from '@/contexts/RoomsContext';
 import { FIXED_COSTS_AMOUNT, FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
 
@@ -121,6 +122,8 @@ type BillTextInput = {
   dueDate: string;
   electricity: string;
   status: BillStatus;
+  items?: BillItem[];
+  totalAmount?: number;
 };
 
 export function buildBillText({
@@ -130,8 +133,23 @@ export function buildBillText({
   dueDate,
   electricity,
   status,
+  items,
+  totalAmount,
 }: BillTextInput): string {
   const totals = computeTotals(room.monthlyRate, electricity);
+  const itemRows = items?.length
+    ? items.map((item) =>
+        row(
+          item.description ?? billItemLabel(item.itemType),
+          formatPeso(item.amount),
+        ),
+      )
+    : [
+        row('Room Rent', formatPeso(totals.roomRent)),
+        'Fixed Costs',
+        row(`  (${FIXED_COSTS_LABEL})`, formatPeso(totals.fixedCosts)),
+      ];
+  const total = totalAmount ?? totals.total;
   const heavy = '═'.repeat(WIDTH);
   const light = '-'.repeat(WIDTH);
 
@@ -153,15 +171,10 @@ export function buildBillText({
     '',
     'ITEMIZED BREAKDOWN',
     light,
-    row('Room Rent', formatPeso(totals.roomRent)),
-    'Fixed Costs',
-    row(`  (${FIXED_COSTS_LABEL})`, formatPeso(totals.fixedCosts)),
+    ...itemRows,
+    ...(items?.length ? [] : ['', row('Electricity', formatPeso(totals.electricity))]),
     row('', '-----------'),
-    row('Partial Monthly Bill', formatPeso(totals.partial)),
-    '',
-    row('Electricity', formatPeso(totals.electricity)),
-    row('', '-----------'),
-    row('TOTAL AMOUNT DUE', formatPeso(totals.total)),
+    row('TOTAL AMOUNT DUE', formatPeso(total)),
     light,
     '',
     `Payment Status:      ${status === 'paid' ? '☐ UNPAID    ☒ PAID' : '☒ UNPAID    ☐ PAID'}`,
@@ -170,4 +183,21 @@ export function buildBillText({
     PAYMENT_REMINDER,
     heavy,
   ].join('\n');
+}
+
+function billItemLabel(itemType: string): string {
+  switch (itemType) {
+    case 'rent':
+      return 'Room rent';
+    case 'water':
+      return 'Water';
+    case 'trash':
+      return 'Trash';
+    case 'wifi':
+      return 'Wi-Fi';
+    case 'electricity':
+      return 'Electricity';
+    default:
+      return 'Adjustment';
+  }
 }

@@ -12,9 +12,9 @@ import {
 
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { CHARGES, isChargeType, type ChargeType } from '@/data/charges';
 import { getSupabaseClient } from '@/utils/supabase';
 
-type ChargeType = 'water' | 'wifi' | 'trash' | 'electricity';
 type ChargeValues = Record<ChargeType, string>;
 type ChargeErrors = Partial<Record<ChargeType, string>>;
 
@@ -25,23 +25,7 @@ const EMPTY_VALUES: ChargeValues = {
   electricity: '',
 };
 
-const CHARGES: {
-  key: ChargeType;
-  label: string;
-  unit: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-  { key: 'water', label: 'Water charge', unit: '₱', icon: 'water-outline' },
-  { key: 'wifi', label: 'Wi-Fi charge', unit: '₱', icon: 'wifi-outline' },
-  { key: 'trash', label: 'Trash charge', unit: '₱', icon: 'trash-outline' },
-  { key: 'electricity', label: 'Electricity rate', unit: '₱/kWh', icon: 'flash-outline' },
-];
-
 const DECIMAL_AMOUNT = /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/;
-
-function isChargeType(value: unknown): value is ChargeType {
-  return value === 'water' || value === 'wifi' || value === 'trash' || value === 'electricity';
-}
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;

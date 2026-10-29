@@ -1,5 +1,5 @@
 to be fixed:
-
+add a current meter reading for every room registered and for every monthly tenant billing cycle, update the current electricity reading to the present electricity reading.
 
 update recommendation:
 ## Future Enhancement: Room-Specific Billing Charge Overrides

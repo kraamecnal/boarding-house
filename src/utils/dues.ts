@@ -47,7 +47,9 @@ export function computeDues(rooms: Room[], getBill: GetBill): DueSummary {
         period,
         dueDate: record.dueDate,
         daysUntilDue: daysBetween(today, record.dueDate),
-        total: computeTotals(room.monthlyRate, record.electricity).total,
+        total: record.billId
+          ? record.totalAmount
+          : computeTotals(room.monthlyRate, record.electricity).total,
         electricityEntered: record.electricity !== '',
       };
 

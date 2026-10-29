@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AnimatedFAB from '@/components/AnimatedFAB';
@@ -10,8 +10,8 @@ import { useRooms } from '@/contexts/RoomsContext';
 export default function BoardingHousesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { boardingHouses } = useBoardingHouses();
-  const { getRoomsForHouse } = useRooms();
+  const { boardingHouses, isLoading, loadError, reload } = useBoardingHouses();
+  const { getRoomsForHouse, loadError: roomsError } = useRooms();
 
   return (
     <View style={styles.container}>
@@ -20,13 +20,44 @@ export default function BoardingHousesScreen() {
         keyExtractor={(house) => house.id}
         contentContainerStyle={[
           styles.listContent,
-          { paddingTop: insets.top + 24 },
+          { paddingTop: insets.top + 8 },
         ]}
-        ListHeaderComponent={<Text style={styles.welcomeText}>HELLO, Admin</Text>}
+        ListHeaderComponent={
+          <View style={styles.listHeader}>
+            <Text style={styles.title}>Boarding houses</Text>
+            {roomsError && <Text style={styles.loadError}>{roomsError}</Text>}
+          </View>
+        }
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            No boarding houses yet.{'\n'}Tap the + button to register one.
-          </Text>
+          isLoading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator color="#2563EB" size="large" />
+            </View>
+          ) : loadError ? (
+            <View style={styles.emptyState}>
+              <Text accessibilityLiveRegion="polite" style={styles.loadError}>{loadError}</Text>
+              <Pressable accessibilityRole="button" onPress={reload} style={styles.emptyAction}>
+                <Text style={styles.emptyActionLabel}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No boarding houses yet.</Text>
+              <Text style={styles.emptyDescription}>
+                Add your first boarding house to get started.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.push('/register-house')}
+                style={({ pressed }) => [
+                  styles.emptyAction,
+                  pressed && styles.emptyActionPressed,
+                ]}
+              >
+                <Text style={styles.emptyActionLabel}>Add boarding house</Text>
+              </Pressable>
+            </View>
+          )
         }
         renderItem={({ item }) => {
           const houseRooms = getRoomsForHouse(item.id);
@@ -37,7 +68,9 @@ export default function BoardingHousesScreen() {
               onPress={() => router.push(`/bh/${item.id}`)}
               style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
               accessibilityRole="button"
-              accessibilityLabel={`Open ${item.name}, ${item.address}`}
+              accessibilityLabel={`Open ${item.name}, ${item.address}, ${roomCount} ${
+                roomCount === 1 ? 'room' : 'rooms'
+              }, ${occupiedCount} occupied`}
             >
               <View style={styles.cardText}>
                 <Text style={styles.houseName}>{item.name}</Text>
@@ -63,44 +96,95 @@ export default function BoardingHousesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#F8FAFC',
   },
   listContent: {
     paddingHorizontal: 16,
-    paddingBottom: 110, // keeps the last card clear of the FAB
+    paddingBottom: 110,
     gap: 12,
     flexGrow: 1,
   },
-  welcomeText: {
-    color: '#1A2B3C',
-    fontSize: 36,
-    fontWeight: '700',
-    letterSpacing: 2,
-    marginBottom: 12,
+  listHeader: {
+    gap: 6,
   },
-  emptyText: {
-    marginTop: 60,
+  title: {
+    color: '#1E3A8A',
+    fontSize: 26,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+  },
+  emptyTitle: {
+    color: '#1E3A8A',
     fontSize: 16,
-    fontWeight: '500',
-    color: '#7A8494',
+    fontWeight: '600',
     textAlign: 'center',
-    paddingHorizontal: 40,
+  },
+  emptyDescription: {
+    marginTop: 6,
+    color: '#64748B',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  loadError: {
+    color: '#B42318',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  emptyAction: {
+    minHeight: 44,
+    justifyContent: 'center',
+    marginTop: 18,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+  },
+  emptyActionPressed: {
+    opacity: 0.75,
+  },
+  emptyActionLabel: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
   },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#D1D5DB',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
   },
-  cardPressed: { opacity: 0.85 },
-  cardText: { flex: 1, gap: 2 },
-  houseName: { fontSize: 18, fontWeight: '700', color: '#1A2B3C' },
-  address: { fontSize: 14, color: '#555' },
-  tenants: { fontSize: 13, fontWeight: '600', color: '#6B7280', marginTop: 4 },
+  cardPressed: {
+    opacity: 0.8,
+  },
+  cardText: {
+    flex: 1,
+    gap: 3,
+    paddingRight: 12,
+  },
+  houseName: {
+    color: '#1E3A8A',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  address: {
+    color: '#64748B',
+    fontSize: 14,
+  },
+  tenants: {
+    marginTop: 3,
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });

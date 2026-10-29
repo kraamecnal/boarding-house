@@ -1,11 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import AnimatedButton from '@/components/AnimatedButton';
+import ImageField from '@/components/ImageField';
 import { useBills } from '@/contexts/BillsContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
+import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
 
 type RoomTab = 'info' | 'history';
@@ -15,12 +27,86 @@ export default function RoomDetailScreen() {
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { getRoomById } = useRooms();
-  const { getPaidBills } = useBills();
+  const {
+    getRoomById,
+    refreshTenantDocument,
+    replaceTenantDocument,
+  } = useRooms();
+  const { getPaidBills, isLoading: isLoadingBills, loadError: billsError, reload: reloadBills } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
 
   const [tab, setTab] = useState<RoomTab>('info');
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerDocumentKind, setViewerDocumentKind] = useState<TenantDocumentKind | null>(null);
+  const [editingDocument, setEditingDocument] = useState<TenantDocumentKind | null>(null);
+  const [replacementImage, setReplacementImage] = useState<TenantDocumentImage | null>(null);
+  const [replacementError, setReplacementError] = useState<string | null>(null);
+  const [replacementNotice, setReplacementNotice] = useState<string | null>(null);
+  const [isReplacing, setIsReplacing] = useState(false);
+  const [documentRetryCount, setDocumentRetryCount] = useState<
+    Partial<Record<TenantDocumentKind, number>>
+  >({});
+  const [documentLoadErrors, setDocumentLoadErrors] = useState<
+    Partial<Record<TenantDocumentKind, string>>
+  >({});
+
+  const retryDocument = async (kind: TenantDocumentKind, force = false) => {
+    if (!force && (documentRetryCount[kind] ?? 0) >= 1) {
+      setDocumentLoadErrors((current) => ({
+        ...current,
+        [kind]: 'Could not load this document. Try again or replace it.',
+      }));
+      return;
+    }
+
+    setDocumentRetryCount((current) => ({
+      ...current,
+      [kind]: force ? 1 : (current[kind] ?? 0) + 1,
+    }));
+    try {
+      const uri = await refreshTenantDocument(roomId ?? '', kind);
+      if (!uri) {
+        setDocumentLoadErrors((current) => ({
+          ...current,
+          [kind]: 'This document is unavailable. You can replace it with a new photo.',
+        }));
+      } else {
+        setDocumentLoadErrors((current) => ({ ...current, [kind]: undefined }));
+        if (viewerDocumentKind === kind) setViewerUri(uri);
+      }
+    } catch (error: unknown) {
+      setDocumentLoadErrors((current) => ({
+        ...current,
+        [kind]: error instanceof Error ? error.message : 'Could not load this document.',
+      }));
+    }
+  };
+
+  const saveReplacement = async () => {
+    if (!roomId || !editingDocument || !replacementImage || isReplacing) return;
+    setIsReplacing(true);
+    setReplacementError(null);
+    setReplacementNotice(null);
+    try {
+      const notice = await replaceTenantDocument(roomId, editingDocument, replacementImage);
+      setReplacementNotice(notice);
+      setEditingDocument(null);
+      setReplacementImage(null);
+    } catch (error: unknown) {
+      setReplacementError(
+        error instanceof Error ? error.message : 'Could not replace this document. Please try again.',
+      );
+    } finally {
+      setIsReplacing(false);
+    }
+  };
+
+  const openReplaceModal = (kind: TenantDocumentKind) => {
+    setEditingDocument(kind);
+    setReplacementImage(null);
+    setReplacementError(null);
+    setReplacementNotice(null);
+  };
 
   if (!room || !isOccupied(room)) {
     return (
@@ -66,9 +152,53 @@ export default function RoomDetailScreen() {
               <InfoRow label="Due date" value={formatShortDate(tenant.dueDate)} />
             </View>
 
-            <PhotoCard label="Valid ID" uri={tenant.idImageUri} onPress={setViewerUri} />
-            <PhotoCard label="Contract" uri={tenant.contractImageUri} onPress={setViewerUri} />
+            <PhotoCard
+              label="Valid ID"
+              uri={tenant.idImageUri}
+              error={documentLoadErrors.id}
+              onPress={(uri) => {
+                setViewerDocumentKind('id');
+                setViewerUri(uri);
+              }}
+              onReplace={() => openReplaceModal('id')}
+              onError={() => void retryDocument('id')}
+              onLoad={() => {
+                setDocumentRetryCount((current) => ({ ...current, id: 0 }));
+                setDocumentLoadErrors((current) => ({ ...current, id: undefined }));
+              }}
+              onRetry={() => void retryDocument('id', true)}
+            />
+            <PhotoCard
+              label="Contract"
+              uri={tenant.contractImageUri}
+              error={documentLoadErrors.agreement}
+              onPress={(uri) => {
+                setViewerDocumentKind('agreement');
+                setViewerUri(uri);
+              }}
+              onReplace={() => openReplaceModal('agreement')}
+              onError={() => void retryDocument('agreement')}
+              onLoad={() => {
+                setDocumentRetryCount((current) => ({ ...current, agreement: 0 }));
+                setDocumentLoadErrors((current) => ({ ...current, agreement: undefined }));
+              }}
+              onRetry={() => void retryDocument('agreement', true)}
+            />
+            {replacementNotice && (
+              <Text accessibilityLiveRegion="polite" style={styles.replacementNotice}>
+                {replacementNotice}
+              </Text>
+            )}
           </>
+        ) : isLoadingBills ? (
+          <ActivityIndicator color="#2563EB" size="large" />
+        ) : billsError ? (
+          <View style={styles.historyError}>
+            <Text style={styles.emptyText}>{billsError}</Text>
+            <Pressable onPress={reloadBills} style={styles.retryButton}>
+              <Text style={styles.retryLabel}>Try again</Text>
+            </Pressable>
+          </View>
         ) : paidBills.length === 0 ? (
           <Text style={styles.emptyText}>
             No paid bills yet.{'\n'}Paid bills will appear here.
@@ -97,14 +227,78 @@ export default function RoomDetailScreen() {
         visible={viewerUri !== null}
         transparent
         animationType="fade"
-        onRequestClose={() => setViewerUri(null)}
+        onRequestClose={() => {
+          setViewerUri(null);
+          setViewerDocumentKind(null);
+        }}
       >
-        <Pressable style={styles.viewer} onPress={() => setViewerUri(null)}>
-          {viewerUri && <Image source={{ uri: viewerUri }} style={styles.viewerImage} />}
+        <Pressable
+          style={styles.viewer}
+          onPress={() => {
+            setViewerUri(null);
+            setViewerDocumentKind(null);
+          }}>
+          {viewerUri && (
+            <Image
+              source={{ uri: viewerUri }}
+              style={styles.viewerImage}
+              onError={() => viewerDocumentKind && void retryDocument(viewerDocumentKind)}
+              onLoad={() => {
+                if (!viewerDocumentKind) return;
+                setDocumentRetryCount((current) => ({ ...current, [viewerDocumentKind]: 0 }));
+                setDocumentLoadErrors((current) => ({ ...current, [viewerDocumentKind]: undefined }));
+              }}
+            />
+          )}
           <View style={[styles.viewerClose, { top: insets.top + 12 }]}>
             <Ionicons name="close" size={26} color="#FFFFFF" />
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={editingDocument !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!isReplacing) setEditingDocument(null);
+        }}>
+        <View style={styles.editOverlay}>
+          <View style={styles.editCard}>
+            <Text style={styles.editTitle}>
+              Replace {editingDocument === 'id' ? 'Valid ID' : 'Contract'}
+            </Text>
+            <ImageField
+              label={editingDocument === 'id' ? 'New valid ID photo' : 'New contract photo'}
+              image={replacementImage}
+              onChange={setReplacementImage}
+              placeholder="Choose or take a new document photo"
+              disabled={isReplacing}
+              isUploading={isReplacing}
+            />
+            {replacementError && (
+              <Text accessibilityLiveRegion="polite" style={styles.replacementError}>
+                {replacementError}
+              </Text>
+            )}
+            <View style={styles.editActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isReplacing}
+                onPress={() => setEditingDocument(null)}
+                style={styles.cancelEditButton}>
+                <Text style={styles.cancelEditLabel}>Cancel</Text>
+              </Pressable>
+              <View style={styles.saveEditButton}>
+                <AnimatedButton
+                  disabled={!replacementImage || isReplacing}
+                  label={isReplacing ? 'Saving…' : 'Save replacement'}
+                  onPress={() => void saveReplacement()}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -143,23 +337,54 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function PhotoCard({
   label,
   uri,
+  error,
   onPress,
+  onReplace,
+  onError,
+  onLoad,
+  onRetry,
 }: {
   label: string;
   uri: string;
+  error?: string;
   onPress: (uri: string) => void;
+  onReplace: () => void;
+  onError: () => void;
+  onLoad: () => void;
+  onRetry: () => void;
 }) {
   return (
     <View style={styles.card}>
       <Text style={styles.photoLabel}>{label}</Text>
-      <Pressable
-        onPress={() => onPress(uri)}
-        accessibilityRole="imagebutton"
-        accessibilityLabel={`View ${label} photo`}
-      >
-        <Image source={{ uri }} style={styles.photo} />
+      {uri ? (
+        <Pressable
+          onPress={() => onPress(uri)}
+          accessibilityRole="imagebutton"
+          accessibilityLabel={`View ${label} photo`}>
+          <Image
+            source={{ uri }}
+            style={styles.photo}
+            onError={onError}
+            onLoad={onLoad}
+          />
+        </Pressable>
+      ) : (
+        <View style={[styles.photo, styles.photoUnavailable]}>
+          <Text style={styles.photoHint}>Document unavailable</Text>
+        </View>
+      )}
+      {error && (
+        <View style={styles.documentErrorRow}>
+          <Text style={styles.documentError}>{error}</Text>
+          <Pressable accessibilityRole="button" onPress={onRetry}>
+            <Text style={styles.retryLabel}>Retry</Text>
+          </Pressable>
+        </View>
+      )}
+      {uri && <Text style={styles.photoHint}>Tap to view full size</Text>}
+      <Pressable accessibilityRole="button" onPress={onReplace} style={styles.replaceDocumentButton}>
+        <Text style={styles.replaceDocumentLabel}>Replace document</Text>
       </Pressable>
-      <Text style={styles.photoHint}>Tap to view full size</Text>
     </View>
   );
 }
@@ -252,9 +477,83 @@ const styles = StyleSheet.create({
     backgroundColor: '#F7F8FA',
     resizeMode: 'cover',
   },
+  photoUnavailable: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   photoHint: {
     color: '#6B7280',
     fontSize: 12,
+  },
+  replaceDocumentButton: {
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+  },
+  replaceDocumentLabel: {
+    color: '#2563EB',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  documentErrorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  documentError: {
+    flex: 1,
+    color: '#B42318',
+    fontSize: 13,
+  },
+  replacementNotice: {
+    color: '#64748B',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  replacementError: {
+    color: '#B42318',
+    fontSize: 13,
+  },
+  editOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 18,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  editCard: {
+    maxHeight: '90%',
+    padding: 18,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  editTitle: {
+    color: '#1E3A8A',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  editActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 16,
+  },
+  cancelEditButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  cancelEditLabel: {
+    color: '#64748B',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  saveEditButton: {
+    flex: 1,
   },
   historyCard: {
     flexDirection: 'row',
@@ -290,6 +589,23 @@ const styles = StyleSheet.create({
     color: '#1A2B3C',
     fontSize: 15,
     fontWeight: '700',
+  },
+  historyError: {
+    alignItems: 'center',
+    gap: 12,
+    padding: 18,
+  },
+  retryButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+  },
+  retryLabel: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
   },
   viewer: {
     flex: 1,

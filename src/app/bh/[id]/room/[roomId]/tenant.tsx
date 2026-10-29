@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Alert,
+    ActivityIndicator,
     KeyboardAvoidingView,
     Modal,
     Platform,
@@ -17,8 +18,14 @@ import {
 
 import AnimatedButton from '@/components/AnimatedButton';
 import ImageField from '@/components/ImageField';
+import { useAuth } from '@/contexts/AuthContext';
 import { addOneMonth, useRooms } from '@/contexts/RoomsContext';
-import { formatPeso } from '@/utils/billing';
+import { CHARGES, isChargeType, type ChargeType } from '@/data/charges';
+import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
+import { formatPeso, sanitizeAmountInput } from '@/utils/billing';
+import { getSupabaseClient } from '@/utils/supabase';
+
+const DECIMAL_AMOUNT = /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/;
 
 function toIsoDate(date: Date): string {
   const yyyy = date.getFullYear();
@@ -39,7 +46,9 @@ export default function RegisterTenantScreen() {
   const params = useLocalSearchParams<{ id: string; roomId: string }>();
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const router = useRouter();
-  const { getRoomById, assignTenant } = useRooms();
+  const { getRoomById, assignTenant, isLoading: isLoadingRooms, loadError: roomsError } = useRooms();
+  const { session } = useAuth();
+  const ownerId = session?.user.id;
   const room = roomId ? getRoomById(roomId) : undefined;
 
   const [firstName, setFirstName] = useState('');
@@ -48,8 +57,78 @@ export default function RegisterTenantScreen() {
   const [contactNumber, setContactNumber] = useState('');
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [idImageUri, setIdImageUri] = useState<string | null>(null);
-  const [contractImageUri, setContractImageUri] = useState<string | null>(null);
+  const [idImage, setIdImage] = useState<TenantDocumentImage | null>(null);
+  const [contractImage, setContractImage] = useState<TenantDocumentImage | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState<TenantDocumentKind | null>(null);
+  const [customChargesEnabled, setCustomChargesEnabled] = useState(false);
+  const [selectedCustomCharges, setSelectedCustomCharges] = useState<Record<ChargeType, boolean>>({
+    water: false,
+    wifi: false,
+    trash: false,
+    electricity: false,
+  });
+  const [customChargeValues, setCustomChargeValues] = useState<Partial<Record<ChargeType, string>>>({});
+  const [chargeErrors, setChargeErrors] = useState<Partial<Record<ChargeType, string>>>({});
+  const [defaultChargeRates, setDefaultChargeRates] = useState<Partial<Record<ChargeType, number>>>({});
+  const [isLoadingDefaults, setIsLoadingDefaults] = useState(true);
+  const [defaultsError, setDefaultsError] = useState<string | null>(null);
+  const [defaultsAttempt, setDefaultsAttempt] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    const loadDefaultRates = async () => {
+      setIsLoadingDefaults(true);
+      setDefaultsError(null);
+      if (!ownerId || !room) {
+        setIsLoadingDefaults(false);
+        return;
+      }
+
+      try {
+        const client = getSupabaseClient();
+        const [
+          { data: ownerRows, error: ownerError },
+          { data: roomRows, error: roomError },
+        ] = await Promise.all([
+          client
+            .from('owner_default_charges')
+            .select('item_type, unit_price')
+            .eq('owner_id', ownerId),
+          client
+            .from('room_default_charges')
+            .select('item_type, unit_price')
+            .eq('room_id', room.id),
+        ]);
+        if (ownerError) throw ownerError;
+        if (roomError) throw roomError;
+
+        const rates: Partial<Record<ChargeType, number>> = {};
+        for (const row of ownerRows ?? []) {
+          if (isChargeType(row.item_type)) rates[row.item_type] = Number(row.unit_price);
+        }
+        for (const row of roomRows ?? []) {
+          if (isChargeType(row.item_type)) rates[row.item_type] = Number(row.unit_price);
+        }
+        if (isCurrent) setDefaultChargeRates(rates);
+      } catch (error: unknown) {
+        if (isCurrent) {
+          setDefaultsError(
+            error instanceof Error ? error.message : 'Could not load the standard charge rates.',
+          );
+        }
+      } finally {
+        if (isCurrent) setIsLoadingDefaults(false);
+      }
+    };
+
+    void loadDefaultRates();
+    return () => {
+      isCurrent = false;
+    };
+  }, [defaultsAttempt, ownerId, room]);
 
   const dueDatePreview = useMemo(() => {
     if (!startDate) return null;
@@ -70,7 +149,11 @@ export default function RegisterTenantScreen() {
   if (!room) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.centeredText}>Room not found.</Text>
+        {isLoadingRooms ? (
+          <ActivityIndicator color="#2563EB" size="large" />
+        ) : (
+          <Text style={styles.centeredText}>{roomsError ?? 'Room not found.'}</Text>
+        )}
       </View>
     );
   }
@@ -83,30 +166,70 @@ export default function RegisterTenantScreen() {
     );
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
     if (!firstName.trim() || !lastName.trim())
       return Alert.alert('Missing info', "Please enter the tenant's full name.");
     if (!email.trim()) return Alert.alert('Missing info', 'Please enter an email address.');
     if (!contactNumber.trim())
       return Alert.alert('Missing info', 'Please enter a contact number.');
     if (!startDate) return Alert.alert('Missing info', 'Please pick a start date.');
-    if (!idImageUri) {
+    if (!idImage) {
       return Alert.alert('Missing info', "Please attach a photo of the tenant's valid ID.");
     }
-    if (!contractImageUri) {
+    if (!contractImage) {
       return Alert.alert('Missing info', 'Please attach a photo of the signed contract.');
     }
 
-    assignTenant(room.id, {
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim(),
-      contactNumber: contactNumber.trim(),
-      startDate: toIsoDate(startDate),
-      idImageUri,
-      contractImageUri,
-    });
-    router.back();
+    const nextChargeErrors: Partial<Record<ChargeType, string>> = {};
+    const customRates: Partial<Record<ChargeType, string>> = {};
+    if (customChargesEnabled) {
+      for (const charge of CHARGES) {
+        if (!selectedCustomCharges[charge.key]) continue;
+        const value = customChargeValues[charge.key]?.trim() ?? '';
+        if (!value) {
+          nextChargeErrors[charge.key] = 'Enter a unit price for this charge.';
+        } else if (!DECIMAL_AMOUNT.test(value) || !Number.isFinite(Number(value))) {
+          nextChargeErrors[charge.key] = 'Enter a valid amount with no more than 2 decimal places.';
+        } else if (Number(value) < 0) {
+          nextChargeErrors[charge.key] = 'Charge amounts cannot be negative.';
+        } else {
+          customRates[charge.key] = value;
+        }
+      }
+    }
+    setChargeErrors(nextChargeErrors);
+    if (Object.keys(nextChargeErrors).length > 0) {
+      return Alert.alert('Check custom charges', 'Enter a valid nonnegative rate for each selected charge.');
+    }
+
+    setSubmitError(null);
+    setIsSubmitting(true);
+    try {
+      const notice = await assignTenant(
+        room.id,
+        {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email.trim(),
+          contactNumber: contactNumber.trim(),
+          startDate: toIsoDate(startDate),
+          idImage,
+          contractImage,
+        },
+        customChargesEnabled ? customRates : {},
+        setUploadingDocument,
+      );
+      if (notice) {
+        Alert.alert('Tenant registered', notice, [{ text: 'OK', onPress: () => router.back() }]);
+      } else {
+        router.back();
+      }
+    } catch (error: unknown) {
+      setSubmitError(error instanceof Error ? error.message : 'Could not register this tenant.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -119,6 +242,119 @@ export default function RegisterTenantScreen() {
           <Text style={styles.roomBannerName}>{room.roomName}</Text>
           <Text style={styles.roomBannerRate}>{formatPeso(room.monthlyRate)} / month</Text>
         </View>
+
+        <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: customChargesEnabled }}
+          onPress={() => setCustomChargesEnabled((enabled) => !enabled)}
+          style={styles.customChargeToggle}
+        >
+          <Ionicons
+            color={customChargesEnabled ? '#2563EB' : '#64748B'}
+            name={customChargesEnabled ? 'checkbox' : 'square-outline'}
+            size={22}
+          />
+          <View style={styles.customChargeToggleCopy}>
+            <Text style={styles.customChargeTitle}>Customize charges</Text>
+            <Text style={styles.customChargeDescription}>
+              Set different billing charges for this tenancy.
+            </Text>
+          </View>
+        </Pressable>
+
+        {customChargesEnabled && (
+          <View style={styles.customCharges}>
+            {isLoadingDefaults && (
+              <View style={styles.defaultsState}>
+                <ActivityIndicator color="#2563EB" size="small" />
+                <Text style={styles.defaultsText}>Loading standard rates…</Text>
+              </View>
+            )}
+            {defaultsError && (
+              <View style={styles.defaultsError}>
+                <Text style={styles.defaultsErrorText}>{defaultsError}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setDefaultsAttempt((attempt) => attempt + 1)}
+                  style={styles.retryDefaults}
+                >
+                  <Text style={styles.retryDefaultsText}>Try again</Text>
+                </Pressable>
+              </View>
+            )}
+            {CHARGES.map((charge) => {
+              const checked = selectedCustomCharges[charge.key];
+              const defaultRate = defaultChargeRates[charge.key];
+              return (
+                <View key={charge.key} style={styles.chargeCard}>
+                  <Pressable
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked }}
+                    onPress={() => {
+                      setSelectedCustomCharges((current) => ({
+                        ...current,
+                        [charge.key]: !current[charge.key],
+                      }));
+                      setChargeErrors((current) => ({ ...current, [charge.key]: undefined }));
+                    }}
+                    style={styles.chargeChoice}
+                  >
+                    <Ionicons
+                      color={checked ? '#2563EB' : '#64748B'}
+                      name={checked ? 'checkbox' : 'square-outline'}
+                      size={21}
+                    />
+                    <View style={styles.chargeCopy}>
+                      <Text style={styles.chargeLabel}>{charge.label}</Text>
+                      <Text style={styles.chargePeriod}>
+                        Standard:{' '}
+                        {defaultRate === undefined
+                          ? 'not set'
+                          : `${formatPeso(defaultRate)} ${
+                              charge.key === 'electricity' ? 'per kWh' : 'per bill'
+                            }`}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  {checked && (
+                    <View style={styles.chargeInputSection}>
+                      <Text style={styles.unitPriceLabel}>Unit price · {charge.period}</Text>
+                      <View
+                        style={[
+                          styles.unitPriceField,
+                          chargeErrors[charge.key] && styles.unitPriceFieldError,
+                        ]}
+                      >
+                        <Text style={styles.pesoPrefix}>₱</Text>
+                        <TextInput
+                          accessibilityLabel={`${charge.label} unit price in pesos ${charge.period}`}
+                          keyboardType="decimal-pad"
+                          maxLength={10}
+                          onChangeText={(text) => {
+                            setCustomChargeValues((current) => ({
+                              ...current,
+                              [charge.key]: sanitizeAmountInput(text),
+                            }));
+                            setChargeErrors((current) => ({ ...current, [charge.key]: undefined }));
+                          }}
+                          placeholder="0.00"
+                          placeholderTextColor="#94A3B8"
+                          selectTextOnFocus
+                          style={styles.unitPriceInput}
+                          value={customChargeValues[charge.key] ?? ''}
+                        />
+                        {charge.key === 'electricity' && <Text style={styles.unitSuffix}>/ kWh</Text>}
+                      </View>
+                      {chargeErrors[charge.key] && (
+                        <Text style={styles.chargeError}>{chargeErrors[charge.key]}</Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         <Text style={styles.label}>First name</Text>
         <TextInput style={styles.input} value={firstName} onChangeText={setFirstName} />
@@ -183,22 +419,29 @@ export default function RegisterTenantScreen() {
 
         <ImageField
           label="Valid ID"
-          uri={idImageUri}
-          onChange={setIdImageUri}
+          image={idImage}
+          onChange={setIdImage}
           placeholder="Tap to attach a photo of a valid ID"
-          permissionMessage="Please allow photo library access so you can attach a valid ID."
+          isUploading={uploadingDocument === 'id'}
+          disabled={isSubmitting}
         />
 
         <ImageField
           label="Contract"
-          uri={contractImageUri}
-          onChange={setContractImageUri}
+          image={contractImage}
+          onChange={setContractImage}
           placeholder="Tap to attach a photo of the signed contract"
-          permissionMessage="Please allow photo library access so you can attach the contract."
+          isUploading={uploadingDocument === 'agreement'}
+          disabled={isSubmitting}
         />
 
+        {submitError && <Text accessibilityLiveRegion="polite" style={styles.submitError}>{submitError}</Text>}
         <View style={styles.submitWrapper}>
-          <AnimatedButton label="Register Tenant" onPress={handleSubmit} />
+          <AnimatedButton
+            disabled={isSubmitting}
+            label={isSubmitting ? 'Saving…' : 'Register Tenant'}
+            onPress={() => void handleSubmit()}
+          />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -240,6 +483,143 @@ const styles = StyleSheet.create({
     color: '#2563EB',
     fontSize: 14,
     fontWeight: '600',
+  },
+  customChargeToggle: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 10,
+    paddingHorizontal: 2,
+  },
+  customChargeToggleCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  customChargeTitle: {
+    color: '#1E3A8A',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  customChargeDescription: {
+    color: '#64748B',
+    fontSize: 13,
+  },
+  customCharges: {
+    gap: 10,
+    marginBottom: 6,
+  },
+  defaultsState: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#EFF6FF',
+  },
+  defaultsText: {
+    color: '#64748B',
+    fontSize: 13,
+  },
+  defaultsError: {
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#FEF3F2',
+  },
+  defaultsErrorText: {
+    color: '#B42318',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  retryDefaults: {
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+  },
+  retryDefaultsText: {
+    color: '#2563EB',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chargeCard: {
+    gap: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  chargeChoice: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  chargeCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  chargeLabel: {
+    color: '#1E3A8A',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  chargePeriod: {
+    color: '#64748B',
+    fontSize: 12,
+  },
+  chargeInputSection: {
+    gap: 6,
+  },
+  unitPriceLabel: {
+    color: '#334155',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  unitPriceField: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  unitPriceFieldError: {
+    borderColor: '#B42318',
+  },
+  pesoPrefix: {
+    color: '#1E3A8A',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  unitPriceInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 9,
+    color: '#0F172A',
+    fontSize: 15,
+  },
+  unitSuffix: {
+    color: '#64748B',
+    fontSize: 13,
+  },
+  chargeError: {
+    color: '#B42318',
+    fontSize: 12,
+  },
+  submitError: {
+    marginTop: 16,
+    color: '#B42318',
+    fontSize: 13,
   },
   label: {
     color: '#1A2B3C',

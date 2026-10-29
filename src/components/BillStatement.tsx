@@ -10,6 +10,8 @@ type Props = {
   room: OccupiedRoom;
   record: BillRecord;
   onChangeElectricity: (text: string) => void;
+  electricityValue?: string;
+  onCommitElectricity?: (text: string) => void;
   onChangeStatus: (status: BillStatus) => void;
 };
 
@@ -17,9 +19,16 @@ export default function BillStatement({
   room,
   record,
   onChangeElectricity,
+  electricityValue,
+  onCommitElectricity,
   onChangeStatus,
 }: Props) {
   const totals = computeTotals(room.monthlyRate, record.electricity);
+  const meteredElectricity = record.items.some((item) => item.itemType === 'electricity');
+  const displayItems = record.items.filter(
+    (item) => !(item.itemType === 'adjustment' && item.description === 'Electricity'),
+  );
+  const totalAmount = record.billId ? record.totalAmount : totals.total;
 
   return (
     <View style={styles.sheet}>
@@ -46,36 +55,60 @@ export default function BillStatement({
       <Rule />
 
       <View style={styles.block}>
-        <Line label="Room Rent" value={formatPeso(totals.roomRent)} />
-        <Text style={styles.text}>Fixed Costs</Text>
-        <Line label={`  (${FIXED_COSTS_LABEL})`} value={formatPeso(totals.fixedCosts)} />
-        <View style={styles.sumRule} />
-        <Line label="Partial Monthly Bill" value={formatPeso(totals.partial)} />
+        {displayItems.length > 0 ? (
+          displayItems.map((item) => (
+            <Line
+              key={item.id}
+              label={itemLabel(item.itemType, item.description)}
+              detail={
+                item.itemType === 'electricity'
+                  ? `${item.quantity} kWh × ${formatPeso(item.unitPrice)}`
+                  : undefined
+              }
+              value={formatPeso(item.amount)}
+            />
+          ))
+        ) : (
+          <>
+            <Line label="Room Rent" value={formatPeso(totals.roomRent)} />
+            <Text style={styles.text}>Fixed Costs</Text>
+            <Line label={`  (${FIXED_COSTS_LABEL})`} value={formatPeso(totals.fixedCosts)} />
+            <View style={styles.sumRule} />
+            <Line label="Partial Monthly Bill" value={formatPeso(totals.partial)} />
+          </>
+        )}
 
         <View style={styles.gap} />
 
-        {/* The one field the landlord fills in each month */}
-        <View style={styles.lineRow}>
-          <Text style={[styles.text, styles.lineLabel]}>Electricity</Text>
-          <View style={styles.amountBox}>
-            <Text style={styles.peso}>₱</Text>
-            <TextInput
-              style={styles.amountInput}
-              value={record.electricity}
-              onChangeText={onChangeElectricity}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor="#8A94A6"
-              selectTextOnFocus
-              editable={record.status !== 'paid'}
-              maxLength={10}
-              accessibilityLabel="Electricity charge in pesos"
-            />
+        {!meteredElectricity && (
+          <View style={styles.lineRow}>
+            <Text style={[styles.text, styles.lineLabel]}>Electricity</Text>
+            <View style={styles.amountBox}>
+              <Text style={styles.peso}>₱</Text>
+              <TextInput
+                style={styles.amountInput}
+                value={electricityValue ?? record.electricity}
+                onChangeText={onChangeElectricity}
+                onEndEditing={() =>
+                  onCommitElectricity?.(electricityValue ?? record.electricity)
+                }
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor="#8A94A6"
+                selectTextOnFocus
+                editable={Boolean(record.billId) && !record.isFinalized && record.status !== 'paid'}
+                maxLength={10}
+                accessibilityLabel="Electricity charge in pesos"
+              />
+            </View>
           </View>
-        </View>
+        )}
+        {!record.billId && (
+          <Text style={styles.billNotGenerated}>This bill has not been generated yet.</Text>
+        )}
 
         <View style={styles.sumRule} />
-        <Line label="TOTAL AMOUNT DUE" value={formatPeso(totals.total)} bold />
+        <Line label="TOTAL AMOUNT DUE" value={formatPeso(totalAmount)} bold />
       </View>
       <Rule />
 
@@ -114,13 +147,44 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Line({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function Line({
+  label,
+  value,
+  bold,
+  detail,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  detail?: string;
+}) {
   return (
     <View style={styles.lineRow}>
-      <Text style={[styles.text, bold && styles.bold, styles.lineLabel]}>{label}</Text>
+      <View style={styles.lineCopy}>
+        <Text style={[styles.text, bold && styles.bold, styles.lineLabel]}>{label}</Text>
+        {detail && <Text style={styles.itemDetail}>{detail}</Text>}
+      </View>
       <Text style={[styles.text, bold && styles.bold]}>{value}</Text>
     </View>
   );
+}
+
+function itemLabel(itemType: string, description: string | null) {
+  if (description) return description;
+  switch (itemType) {
+    case 'rent':
+      return 'Room rent';
+    case 'water':
+      return 'Water';
+    case 'trash':
+      return 'Trash';
+    case 'wifi':
+      return 'Wi-Fi';
+    case 'electricity':
+      return 'Electricity';
+    default:
+      return 'Adjustment';
+  }
 }
 
 function StatusBox({
@@ -224,8 +288,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  billNotGenerated: {
+    color: '#64748B',
+    fontFamily: MONO,
+    fontSize: 11,
+    textAlign: 'center',
+  },
   lineLabel: {
     flexShrink: 1,
+  },
+  lineCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  itemDetail: {
+    fontFamily: MONO,
+    fontSize: 10,
+    color: '#64748B',
   },
   amountBox: {
     flexDirection: 'row',

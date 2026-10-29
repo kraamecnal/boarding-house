@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -31,11 +32,17 @@ export default function TenantBillScreen() {
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const requestedPeriod = Array.isArray(params.period) ? params.period[0] : params.period;
 
-  const { getRoomById } = useRooms();
-  const { getBill, setElectricity, setStatus } = useBills();
+  const {
+    getRoomById,
+    isLoading: isLoadingRooms,
+    loadError: roomsError,
+  } = useRooms();
+  const { getBill, setElectricity, setStatus, isLoading: isLoadingBills, loadError, reload } = useBills();
   const { hasPaymentPassword } = useAuth();
   const router = useRouter();
   const room = roomId ? getRoomById(roomId) : undefined;
+  const [electricityDraft, setElectricityDraft] = useState('');
+  const [passwordPromptVisible, setPasswordPromptVisible] = useState(false);
 
   const minPeriod = room && isOccupied(room) ? room.tenant.startDate.slice(0, 7) : currentPeriod();
   const thisMonth = currentPeriod();
@@ -46,19 +53,45 @@ export default function TenantBillScreen() {
       ? requestedPeriod
       : maxPeriod;
   const [period, setPeriod] = useState(initialPeriod);
-  const [passwordPromptVisible, setPasswordPromptVisible] = useState(false);
+  const record = room ? getBill(room.id, period) : null;
+
+  useEffect(() => {
+    setElectricityDraft(record?.electricity ?? '');
+  }, [period, record?.electricity, room?.id]);
 
   if (!room || !isOccupied(room)) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.emptyText}>
-          {room ? 'This room has no tenant yet.' : 'Tenant not found.'}
-        </Text>
+        {isLoadingRooms ? (
+          <ActivityIndicator color="#2563EB" size="large" />
+        ) : (
+          <Text style={styles.emptyText}>
+            {roomsError ?? (room ? 'This room has no tenant yet.' : 'Tenant not found.')}
+          </Text>
+        )}
       </View>
     );
   }
 
-  const record = getBill(room.id, period);
+  if (isLoadingBills) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#2563EB" size="large" />
+      </View>
+    );
+  }
+  if (loadError) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.emptyText}>{loadError}</Text>
+        <Pressable onPress={reload} style={styles.retryButton}>
+          <Text style={styles.retryLabel}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  if (!record) return null;
+
   const canGoBack = period > minPeriod;
   const canGoForward = period < maxPeriod;
 
@@ -80,29 +113,75 @@ export default function TenantBillScreen() {
       setPasswordPromptVisible(true);
       return;
     }
-    setStatus(room.id, period, status);
+    void setStatus(room.id, period, status).catch((error: unknown) => {
+      Alert.alert(
+        'Could not update bill',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    });
   };
 
-  const handlePasswordVerified = () => {
+  const handlePasswordVerified = async () => {
     setPasswordPromptVisible(false);
-    const totals = computeTotals(room.monthlyRate, record.electricity);
-    setStatus(room.id, period, 'paid', {
-      roomRent: totals.roomRent,
-      electricity: totals.electricity,
-      total: totals.total,
-    });
+    const rentAmount = record.items
+      .filter((item) => item.itemType === 'rent')
+      .reduce((sum, item) => sum + item.amount, 0);
+    const electricityAmount = record.items
+      .filter(
+        (item) =>
+          item.itemType === 'electricity' ||
+          (item.itemType === 'adjustment' && item.description === 'Electricity'),
+      )
+      .reduce((sum, item) => sum + item.amount, 0);
+    const fallback = computeTotals(room.monthlyRate, electricityDraft);
+    try {
+      await setStatus(room.id, period, 'paid', {
+        roomRent: record.billId ? rentAmount : fallback.roomRent,
+        electricity: record.billId ? electricityAmount : fallback.electricity,
+        total: record.billId ? record.totalAmount : fallback.total,
+      });
+    } catch (error: unknown) {
+      Alert.alert(
+        'Could not update bill',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    }
   };
 
   const handleShare = async () => {
     try {
+      const manualItem = record.items.find(
+        (item) => item.itemType === 'adjustment' && item.description === 'Electricity',
+      );
+      const sharedItems = record.items.filter((item) => item.id !== manualItem?.id);
+      if (electricityDraft.trim() && !record.items.some((item) => item.itemType === 'electricity')) {
+        const amount = Number(electricityDraft);
+        sharedItems.push({
+          id: 'electricity-draft',
+          itemType: 'adjustment',
+          description: 'Electricity',
+          quantity: 1,
+          unitPrice: amount,
+          amount,
+        });
+      }
+      const sharedTotal = record.billId
+        ? record.totalAmount - (manualItem?.amount ?? 0) +
+          (electricityDraft.trim() &&
+          !record.items.some((item) => item.itemType === 'electricity')
+            ? Number(electricityDraft)
+            : 0)
+        : computeTotals(room.monthlyRate, electricityDraft).total;
       await Share.share({
         message: buildBillText({
           room,
           period: record.period,
           issuedDate: record.issuedDate,
           dueDate: record.dueDate,
-          electricity: record.electricity,
+          electricity: electricityDraft,
           status: record.status,
+          items: sharedItems,
+          totalAmount: sharedTotal,
         }),
       });
     } catch {
@@ -156,7 +235,16 @@ export default function TenantBillScreen() {
         <BillStatement
           room={room}
           record={record}
-          onChangeElectricity={(text) => setElectricity(room.id, period, text)}
+          electricityValue={electricityDraft}
+          onChangeElectricity={setElectricityDraft}
+          onCommitElectricity={(text) => {
+            void setElectricity(room.id, period, text).catch((error: unknown) => {
+              Alert.alert(
+                'Could not save electricity',
+                error instanceof Error ? error.message : 'Please try again.',
+              );
+            });
+          }}
           onChangeStatus={handleChangeStatus}
         />
 
@@ -188,6 +276,18 @@ const styles = StyleSheet.create({
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  retryButton: {
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+  },
+  retryLabel: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
   },
   emptyText: {
     fontSize: 16,

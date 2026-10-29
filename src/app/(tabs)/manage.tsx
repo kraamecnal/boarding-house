@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,8 +24,13 @@ export default function ManageScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { rooms } = useRooms();
-  const { getBill } = useBills();
+  const {
+    rooms,
+    isLoading: isLoadingRooms,
+    loadError: roomsError,
+    reload: reloadRooms,
+  } = useRooms();
+  const { getBill, isLoading: isLoadingBills, loadError: billsError, reload: reloadBills } = useBills();
   const [drawerVisible, setDrawerVisible] = useState(false);
 
   const { upcoming, overdue } = useMemo(
@@ -62,22 +68,45 @@ export default function ManageScreen() {
 
         <Text style={styles.greeting}>HELLO, {username}</Text>
 
-        <DashboardSection
-          title="Upcoming monthly due dates"
-          items={upcoming}
-          emptyMessage="No upcoming due dates yet."
-          onItemPress={(item) =>
-            router.push(`/bill/${item.room.id}?period=${item.period}`)
-          }
-        />
-        <DashboardSection
-          title="Unpaid tenants"
-          items={overdue}
-          emptyMessage="No unpaid overdue bills."
-          onItemPress={(item) =>
-            router.push(`/bill/${item.room.id}?period=${item.period}`)
-          }
-        />
+        {isLoadingBills || isLoadingRooms ? (
+          <View style={styles.stateCard}>
+            <ActivityIndicator color={DashboardColors.primary} size="large" />
+          </View>
+        ) : billsError || roomsError ? (
+          <View style={styles.stateCard}>
+            <Text accessibilityLiveRegion="polite" style={styles.emptyMessage}>
+              {roomsError ?? billsError}
+            </Text>
+            <Pressable
+              onPress={() => {
+                reloadRooms();
+                reloadBills();
+              }}
+              style={styles.retryButton}
+            >
+              <Text style={styles.retryLabel}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <DashboardSection
+              title="Upcoming monthly due dates"
+              items={upcoming}
+              emptyMessage="No upcoming due dates yet."
+              onItemPress={(item) =>
+                router.push(`/bill/${item.room.id}?period=${item.period}`)
+              }
+            />
+            <DashboardSection
+              title="Unpaid tenants"
+              items={overdue}
+              emptyMessage="No unpaid overdue bills."
+              onItemPress={(item) =>
+                router.push(`/bill/${item.room.id}?period=${item.period}`)
+              }
+            />
+          </>
+        )}
       </ScrollView>
 
       <DashboardDrawer visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
@@ -187,6 +216,27 @@ const styles = StyleSheet.create({
     color: DashboardColors.neutral,
     fontSize: 14,
     textAlign: 'center',
+  },
+  stateCard: {
+    minHeight: 140,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 18,
+    borderRadius: 16,
+    backgroundColor: DashboardColors.pale,
+  },
+  retryButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: DashboardColors.white,
+  },
+  retryLabel: {
+    color: DashboardColors.primary,
+    fontSize: 14,
+    fontWeight: '700',
   },
   dueItem: {
     minHeight: 42,

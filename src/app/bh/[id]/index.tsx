@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import AnimatedFAB from '@/components/AnimatedFAB';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
@@ -10,21 +10,59 @@ import { formatPeso } from '@/utils/billing';
 export default function BoardingHouseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { getHouseById } = useBoardingHouses();
+  const {
+    getHouseById,
+    isLoading: isLoadingHouses,
+    loadError: housesError,
+    reload: reloadHouses,
+  } = useBoardingHouses();
   const house = getHouseById(id as string);
-  const { getRoomsForHouse } = useRooms();
+  const {
+    getRoomsForHouse,
+    isLoading: isLoadingRooms,
+    loadError: roomsError,
+    reload: reloadRooms,
+  } = useRooms();
 
   if (!house) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, styles.centered]}>
         <Stack.Screen options={{ title: 'Not Found' }} />
-        <Text style={styles.emptyText}>Boarding house "{id}" not found.</Text>
+        {isLoadingHouses ? (
+          <ActivityIndicator color="#2563EB" size="large" />
+        ) : (
+          <>
+            <Text style={styles.emptyText}>{housesError ?? `Boarding house "${id}" not found.`}</Text>
+            {housesError && (
+              <Pressable onPress={reloadHouses} style={styles.retryButton}>
+                <Text style={styles.retryLabel}>Try again</Text>
+              </Pressable>
+            )}
+          </>
+        )}
       </View>
     );
   }
 
   const rooms = getRoomsForHouse(id as string);
   const occupiedCount = rooms.filter((room) => room.status === 'occupied').length;
+
+  if (isLoadingRooms || roomsError) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        {isLoadingRooms ? (
+          <ActivityIndicator color="#2563EB" size="large" />
+        ) : (
+          <>
+            <Text style={styles.emptyText}>{roomsError}</Text>
+            <Pressable onPress={reloadRooms} style={styles.retryButton}>
+              <Text style={styles.retryLabel}>Try again</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -125,6 +163,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     textAlignVertical: 'center',
     paddingHorizontal: 40,
+  },
+  centered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  retryButton: {
+    minHeight: 42,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+  },
+  retryLabel: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
   },
   listContent: {
     padding: 16,

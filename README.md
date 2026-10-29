@@ -59,7 +59,11 @@ You can start developing by editing the files inside the **app** directory. This
 
 Only use the Supabase publishable key in the app. Never put a secret or service-role key in an `EXPO_PUBLIC_` variable or in client code.
 
-Passwordless email authentication is implemented in the app, but it is not confirmed operational until the Supabase dashboard template and redirect allow-list are configured and the complete flow is tested. Boarding houses, rooms, and bills are currently kept in app memory and are not saved to Supabase yet.
+Passwordless email authentication is implemented in the app, but it is not confirmed operational until the Supabase dashboard template and redirect allow-list are configured and the complete flow is tested. Boarding houses, rooms, tenants, tenancies, and monthly bills are stored in Supabase.
+
+The migrations in `supabase/migrations/` add tenancy-specific charge overrides and the private `tenant-documents` bucket. Link the Supabase CLI to the intended project and apply pending migrations in order before registering tenants. The bucket accepts JPEG, PNG, and WebP files up to 5 MB. Its Storage policies validate room ownership through `rooms` and `boarding_house`, and read access requires a matching document path in the owner's tenant, tenancy, or archive record. A non-exposed `private` helper checks references across all owners before deletion because normal RLS queries cannot see other owners' rows. The previous private `Tenant_documents` bucket remains available for referenced legacy and archived documents; only unreferenced objects owned by the signed-in user can be removed.
+
+Tenant document paths are saved in `tenants.id_photo_url` and `tenancy.agreement_photo_url`. The app uses short-lived signed URLs for viewing; it never stores those URLs or uses a service-role key. Camera access is configured through the Expo Image Picker plugin, so rebuild native development clients after changing the permission configuration.
 
 The Manage tab shows the dashboard summary. Open the gear menu to visit Billing charges or Profile; the Profile page links to the About and Version information.
 
