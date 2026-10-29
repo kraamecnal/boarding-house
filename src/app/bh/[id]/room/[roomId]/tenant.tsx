@@ -23,6 +23,7 @@ import { addOneMonth, useRooms } from '@/contexts/RoomsContext';
 import { CHARGES, isChargeType, type ChargeType } from '@/data/charges';
 import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
 import { formatPeso, sanitizeAmountInput } from '@/utils/billing';
+import { parseMeterReadingInput, sanitizeMeterReadingInput } from '@/utils/meterReadings';
 import { getSupabaseClient } from '@/utils/supabase';
 
 const DECIMAL_AMOUNT = /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/;
@@ -56,6 +57,7 @@ export default function RegisterTenantScreen() {
   const [email, setEmail] = useState('');
   const [contactNumber, setContactNumber] = useState('');
   const [startDate, setStartDate] = useState<Date | null>(null);
+  const [openingMeterReading, setOpeningMeterReading] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [idImage, setIdImage] = useState<TenantDocumentImage | null>(null);
   const [contractImage, setContractImage] = useState<TenantDocumentImage | null>(null);
@@ -110,7 +112,9 @@ export default function RegisterTenantScreen() {
           if (isChargeType(row.item_type)) rates[row.item_type] = Number(row.unit_price);
         }
         for (const row of roomRows ?? []) {
-          if (isChargeType(row.item_type)) rates[row.item_type] = Number(row.unit_price);
+          if (isChargeType(row.item_type) && row.item_type !== 'electricity') {
+            rates[row.item_type] = Number(row.unit_price);
+          }
         }
         if (isCurrent) setDefaultChargeRates(rates);
       } catch (error: unknown) {
@@ -174,6 +178,19 @@ export default function RegisterTenantScreen() {
     if (!contactNumber.trim())
       return Alert.alert('Missing info', 'Please enter a contact number.');
     if (!startDate) return Alert.alert('Missing info', 'Please pick a start date.');
+    const hasStarted = toIsoDate(startDate) <= toIsoDate(new Date());
+    const openingReadingValue = hasStarted && openingMeterReading.trim()
+      ? parseMeterReadingInput(openingMeterReading)
+      : null;
+    if (hasStarted && openingMeterReading.trim() && openingReadingValue === null) {
+      return Alert.alert('Invalid reading', 'Enter a valid nonnegative opening meter reading.');
+    }
+    if (hasStarted && openingReadingValue === null) {
+      return Alert.alert(
+        'Opening reading required',
+        'Enter the meter value on the move-in date before registering a tenant who has already moved in.',
+      );
+    }
     if (!idImage) {
       return Alert.alert('Missing info', "Please attach a photo of the tenant's valid ID.");
     }
@@ -214,6 +231,7 @@ export default function RegisterTenantScreen() {
           email: email.trim(),
           contactNumber: contactNumber.trim(),
           startDate: toIsoDate(startDate),
+          openingMeterReading: openingReadingValue,
           idImage,
           contractImage,
         },
@@ -386,6 +404,30 @@ export default function RegisterTenantScreen() {
           </Text>
           <Ionicons name="calendar-outline" size={20} color="#1A2B3C" />
         </Pressable>
+
+        <Text style={styles.label}>Opening meter reading (kWh)</Text>
+        {startDate && toIsoDate(startDate) <= toIsoDate(new Date()) ? (
+          <>
+            <TextInput
+              accessibilityLabel="Opening meter reading in kilowatt-hours"
+              style={styles.input}
+              value={openingMeterReading}
+              onChangeText={(text) => setOpeningMeterReading(sanitizeMeterReadingInput(text))}
+              keyboardType="decimal-pad"
+              placeholder="Value shown on the meter at move-in"
+              placeholderTextColor="#8A94A6"
+            />
+            <Text style={styles.readingHelper}>
+              This reading is saved on the move-in date and prevents electricity used by a previous
+              tenant from being billed to this tenancy.
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.readingHelper}>
+            For a future move-in, record the opening reading on the move-in date before billing
+            electricity.
+          </Text>
+        )}
 
         {dueDatePreview && (
           <Text style={styles.dueDateHint}>Due date will be set to {dueDatePreview}</Text>
@@ -635,6 +677,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
     color: '#1A2B3C',
+  },
+  readingHelper: {
+    color: '#64748B',
+    fontSize: 12,
+    lineHeight: 18,
   },
   dateField: {
     borderWidth: 1,

@@ -89,17 +89,17 @@ export default function BoardingHouseScreen() {
             if (!isOccupied(item)) {
               return (
                 <Pressable
-                  onPress={() => router.push(`/bh/${id}/room/${item.id}/tenant`)}
+                  onPress={() => router.push(`/bh/${id}/room/${item.id}`)}
                   style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.roomName} is vacant. Register a tenant.`}
+                  accessibilityLabel={`Open ${item.roomName}, currently vacant`}
                 >
                   <View style={styles.cardHeader}>
                     <Text style={styles.roomTitle}>{item.roomName}</Text>
                     <StatusBadge occupied={false} />
                   </View>
                   <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
-                  <Text style={styles.cta}>Tap to register a tenant</Text>
+                  <Text style={styles.cta}>Tap to view room details</Text>
                 </Pressable>
               );
             }

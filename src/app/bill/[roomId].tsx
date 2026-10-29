@@ -25,7 +25,14 @@ import {
   currentPeriod,
   periodLabel,
   shiftPeriod,
+  todayIso,
 } from '@/utils/billing';
+import {
+  getBillMeterContext,
+  saveBillMeterReading,
+  type BillMeterContext,
+} from '@/utils/meterBilling';
+import { parseMeterReadingInput, sanitizeMeterReadingInput } from '@/utils/meterReadings';
 
 export default function TenantBillScreen() {
   const params = useLocalSearchParams<{ roomId: string; period?: string }>();
@@ -37,11 +44,10 @@ export default function TenantBillScreen() {
     isLoading: isLoadingRooms,
     loadError: roomsError,
   } = useRooms();
-  const { getBill, setElectricity, setStatus, isLoading: isLoadingBills, loadError, reload } = useBills();
+  const { getBill, setStatus, isLoading: isLoadingBills, loadError, reload } = useBills();
   const { hasPaymentPassword } = useAuth();
   const router = useRouter();
   const room = roomId ? getRoomById(roomId) : undefined;
-  const [electricityDraft, setElectricityDraft] = useState('');
   const [passwordPromptVisible, setPasswordPromptVisible] = useState(false);
 
   const minPeriod = room && isOccupied(room) ? room.tenant.startDate.slice(0, 7) : currentPeriod();
@@ -54,10 +60,49 @@ export default function TenantBillScreen() {
       : maxPeriod;
   const [period, setPeriod] = useState(initialPeriod);
   const record = room ? getBill(room.id, period) : null;
+  const [meterContext, setMeterContext] = useState<BillMeterContext | null>(null);
+  const [isLoadingMeterContext, setIsLoadingMeterContext] = useState(false);
+  const [meterContextError, setMeterContextError] = useState<string | null>(null);
+  const [meterReadingValue, setMeterReadingValue] = useState('');
+  const [isSavingMeterReading, setIsSavingMeterReading] = useState(false);
+  const [meterContextAttempt, setMeterContextAttempt] = useState(0);
 
   useEffect(() => {
-    setElectricityDraft(record?.electricity ?? '');
-  }, [period, record?.electricity, room?.id]);
+    let isCurrent = true;
+    if (!record?.billId) {
+      setMeterContext(null);
+      setMeterContextError(null);
+      setIsLoadingMeterContext(false);
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    setIsLoadingMeterContext(true);
+    setMeterContextError(null);
+    void getBillMeterContext(record.billId, todayIso())
+      .then((context) => {
+        if (!isCurrent) return;
+        setMeterContext(context);
+        setMeterReadingValue(
+          context.currentReading ? String(context.currentReading.value) : '',
+        );
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent) return;
+        setMeterContext(null);
+        setMeterContextError(
+          error instanceof Error ? error.message : 'Could not load meter details.',
+        );
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingMeterContext(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [meterContextAttempt, period, record?.billId]);
 
   if (!room || !isOccupied(room)) {
     return (
@@ -91,6 +136,29 @@ export default function TenantBillScreen() {
     );
   }
   if (!record) return null;
+
+  const handleSaveMeterReading = async () => {
+    if (!record.billId || isSavingMeterReading) return;
+    const value = parseMeterReadingInput(meterReadingValue);
+    if (value === null) {
+      Alert.alert('Invalid reading', 'Enter a valid nonnegative meter reading.');
+      return;
+    }
+
+    setIsSavingMeterReading(true);
+    try {
+      await saveBillMeterReading(record.billId, value, todayIso());
+      setMeterContextAttempt((attempt) => attempt + 1);
+      reload();
+    } catch (error: unknown) {
+      Alert.alert(
+        'Could not save meter reading',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      setIsSavingMeterReading(false);
+    }
+  };
 
   const canGoBack = period > minPeriod;
   const canGoForward = period < maxPeriod;
@@ -133,7 +201,7 @@ export default function TenantBillScreen() {
           (item.itemType === 'adjustment' && item.description === 'Electricity'),
       )
       .reduce((sum, item) => sum + item.amount, 0);
-    const fallback = computeTotals(room.monthlyRate, electricityDraft);
+    const fallback = computeTotals(room.monthlyRate, record.electricity);
     try {
       await setStatus(room.id, period, 'paid', {
         roomRent: record.billId ? rentAmount : fallback.roomRent,
@@ -150,37 +218,18 @@ export default function TenantBillScreen() {
 
   const handleShare = async () => {
     try {
-      const manualItem = record.items.find(
-        (item) => item.itemType === 'adjustment' && item.description === 'Electricity',
-      );
-      const sharedItems = record.items.filter((item) => item.id !== manualItem?.id);
-      if (electricityDraft.trim() && !record.items.some((item) => item.itemType === 'electricity')) {
-        const amount = Number(electricityDraft);
-        sharedItems.push({
-          id: 'electricity-draft',
-          itemType: 'adjustment',
-          description: 'Electricity',
-          quantity: 1,
-          unitPrice: amount,
-          amount,
-        });
-      }
       const sharedTotal = record.billId
-        ? record.totalAmount - (manualItem?.amount ?? 0) +
-          (electricityDraft.trim() &&
-          !record.items.some((item) => item.itemType === 'electricity')
-            ? Number(electricityDraft)
-            : 0)
-        : computeTotals(room.monthlyRate, electricityDraft).total;
+        ? record.totalAmount
+        : computeTotals(room.monthlyRate, record.electricity).total;
       await Share.share({
         message: buildBillText({
           room,
           period: record.period,
           issuedDate: record.issuedDate,
           dueDate: record.dueDate,
-          electricity: electricityDraft,
+          electricity: record.electricity,
           status: record.status,
-          items: sharedItems,
+          items: record.items,
           totalAmount: sharedTotal,
         }),
       });
@@ -228,23 +277,16 @@ export default function TenantBillScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.hint}>
-          Type this month's electricity in the Electricity box. The total updates as you type.
-        </Text>
-
         <BillStatement
           room={room}
           record={record}
-          electricityValue={electricityDraft}
-          onChangeElectricity={setElectricityDraft}
-          onCommitElectricity={(text) => {
-            void setElectricity(room.id, period, text).catch((error: unknown) => {
-              Alert.alert(
-                'Could not save electricity',
-                error instanceof Error ? error.message : 'Please try again.',
-              );
-            });
-          }}
+          meterContext={meterContext}
+          meterContextLoading={isLoadingMeterContext}
+          meterContextError={meterContextError}
+          meterReadingValue={meterReadingValue}
+          isSavingMeterReading={isSavingMeterReading}
+          onChangeMeterReading={(text) => setMeterReadingValue(sanitizeMeterReadingInput(text))}
+          onSaveMeterReading={() => void handleSaveMeterReading()}
           onChangeStatus={handleChangeStatus}
         />
 

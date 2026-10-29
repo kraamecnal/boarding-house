@@ -223,8 +223,8 @@ export default function BillingChargesScreen() {
               <Ionicons color={DashboardColors.primary} name="shield-checkmark-outline" size={18} />
               <Text style={styles.infoText}>
                 Water, Wi-Fi, and trash defaults are copied into newly generated bills. Existing
-                bills keep their original amounts. The current bill-generation function excludes
-                electricity, so this saved rate is not yet applied by that function.
+                bills keep their original amounts. Newly generated bills use this electricity rate
+                when valid meter readings are available.
               </Text>
             </View>
 

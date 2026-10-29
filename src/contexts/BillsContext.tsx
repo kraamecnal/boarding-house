@@ -3,7 +3,7 @@ import { createContext, ReactNode, useContext, useEffect, useMemo, useState } fr
 import { useAuth } from '@/contexts/AuthContext';
 import { isOccupied, useRooms, type Room } from '@/contexts/RoomsContext';
 import { DUE_DAY_OF_NEXT_MONTH } from '@/data/billingConfig';
-import { computeTotals, dueDateFor, sanitizeAmountInput, todayIso } from '@/utils/billing';
+import { computeTotals, dueDateFor, todayIso } from '@/utils/billing';
 import { getSupabaseClient } from '@/utils/supabase';
 
 export type BillStatus = 'unpaid' | 'paid';
@@ -135,7 +135,6 @@ type BillsContextValue = {
   loadError: string | null;
   reload: () => void;
   getBill: (roomId: string, period: string) => BillRecord;
-  setElectricity: (roomId: string, period: string, text: string) => Promise<void>;
   setStatus: (
     roomId: string,
     period: string,
@@ -225,47 +224,6 @@ export function BillsProvider({ children }: { children: ReactNode }) {
       getBill: (roomId, period) =>
         records[recordKey(roomId, period)] ??
         makeDefaultBill(rooms.find((room) => room.id === roomId), period),
-      setElectricity: async (roomId, period, text) => {
-        const record = records[recordKey(roomId, period)];
-        if (!record?.billId) throw new Error('This monthly bill has not been generated yet.');
-        if (record.isFinalized || record.status === 'paid') {
-          throw new Error('This bill is finalized and can no longer be changed.');
-        }
-
-        const amountText = sanitizeAmountInput(text);
-        const amount = amountText.trim() ? Number(amountText) : 0;
-        if (!Number.isFinite(amount) || amount < 0) {
-          throw new Error('Enter a valid nonnegative electricity amount.');
-        }
-
-        const client = getSupabaseClient();
-        const { data: existing, error: findError } = await client
-          .from('bill_items')
-          .select('bill_item_id')
-          .eq('bill_id', record.billId)
-          .eq('item_type', 'adjustment')
-          .eq('description', 'Electricity')
-          .maybeSingle();
-        if (findError) throw findError;
-
-        const write = existing
-          ? client
-              .from('bill_items')
-              .update({ quantity: 1, unit_price: amount })
-              .eq('bill_item_id', existing.bill_item_id)
-              .select('bill_item_id')
-              .single()
-          : client.from('bill_items').insert({
-              bill_id: record.billId,
-              item_type: 'adjustment',
-              description: 'Electricity',
-              quantity: 1,
-              unit_price: amount,
-            }).select('bill_item_id').single();
-        const { error } = await write;
-        if (error) throw error;
-        setLoadAttempt((attempt) => attempt + 1);
-      },
       setStatus: async (roomId, period, status) => {
         const record = records[recordKey(roomId, period)];
         if (!record?.billId) throw new Error('This monthly bill has not been generated yet.');

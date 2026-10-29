@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +20,10 @@ import { useBills } from '@/contexts/BillsContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
+import {
+  getRoomMeterReadings,
+  type MeterReading,
+} from '@/utils/meterReadings';
 
 type RoomTab = 'info' | 'history';
 
@@ -29,7 +34,10 @@ export default function RoomDetailScreen() {
   const insets = useSafeAreaInsets();
   const {
     getRoomById,
+    isLoading: isLoadingRooms,
+    loadError: roomsError,
     refreshTenantDocument,
+    reload: reloadRooms,
     replaceTenantDocument,
   } = useRooms();
   const { getPaidBills, isLoading: isLoadingBills, loadError: billsError, reload: reloadBills } = useBills();
@@ -49,6 +57,9 @@ export default function RoomDetailScreen() {
   const [documentLoadErrors, setDocumentLoadErrors] = useState<
     Partial<Record<TenantDocumentKind, string>>
   >({});
+  const [meterReadings, setMeterReadings] = useState<MeterReading[]>([]);
+  const [isLoadingMeterReadings, setIsLoadingMeterReadings] = useState(true);
+  const [meterReadingsError, setMeterReadingsError] = useState<string | null>(null);
 
   const retryDocument = async (kind: TenantDocumentKind, force = false) => {
     if (!force && (documentRetryCount[kind] ?? 0) >= 1) {
@@ -108,19 +119,63 @@ export default function RoomDetailScreen() {
     setReplacementNotice(null);
   };
 
-  if (!room || !isOccupied(room)) {
+  const refreshMeterReadings = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
+      if (!roomId) return;
+      setIsLoadingMeterReadings(true);
+      setMeterReadingsError(null);
+      try {
+        const readings = await getRoomMeterReadings(roomId);
+        if (isCurrent()) setMeterReadings(readings);
+      } catch (error: unknown) {
+        if (isCurrent()) {
+          setMeterReadingsError(
+            error instanceof Error ? error.message : 'Could not load meter readings.',
+          );
+        }
+      } finally {
+        if (isCurrent()) setIsLoadingMeterReadings(false);
+      }
+    },
+    [roomId],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isCurrent = true;
+      void refreshMeterReadings(() => isCurrent);
+      return () => {
+        isCurrent = false;
+      };
+    }, [refreshMeterReadings]),
+  );
+
+  if (!room) {
+    if (isLoadingRooms) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator color="#2563EB" size="large" />
+        </View>
+      );
+    }
+
     return (
       <View style={styles.centered}>
-        <Stack.Screen options={{ title: room?.roomName ?? 'Room' }} />
-        <Text style={styles.emptyText}>
-          {room ? `${room.roomName} has no tenant yet.` : 'Room not found.'}
-        </Text>
+        <Stack.Screen options={{ title: 'Room' }} />
+        <Text style={styles.emptyText}>{roomsError ?? 'Room not found.'}</Text>
+        {roomsError && (
+          <Pressable onPress={reloadRooms} style={styles.retryButton}>
+            <Text style={styles.retryLabel}>Try again</Text>
+          </Pressable>
+        )}
       </View>
     );
   }
 
-  const { tenant } = room;
-  const paidBills = getPaidBills(room.id);
+  const occupied = isOccupied(room);
+  const tenant = occupied ? room.tenant : null;
+  const paidBills = occupied ? getPaidBills(room.id) : [];
+  const latestMeterReading = meterReadings[0];
 
   return (
     <View style={styles.container}>
@@ -144,52 +199,179 @@ export default function RoomDetailScreen() {
           <>
             <View style={styles.card}>
               <InfoRow label="Room" value={room.roomName} />
+              <InfoRow label="Status" value={occupied ? 'Occupied' : 'Vacant'} />
               <InfoRow label="Monthly rate" value={`${formatPeso(room.monthlyRate)} / month`} />
-              <InfoRow label="Tenant" value={`${tenant.firstName} ${tenant.lastName}`} />
-              <InfoRow label="Email" value={tenant.email} />
-              <InfoRow label="Contact" value={tenant.contactNumber} />
-              <InfoRow label="Start date" value={formatShortDate(tenant.startDate)} />
-              <InfoRow label="Due date" value={formatShortDate(tenant.dueDate)} />
+              {tenant && (
+                <>
+                  <InfoRow label="Tenant" value={`${tenant.firstName} ${tenant.lastName}`} />
+                  <InfoRow label="Email" value={tenant.email} />
+                  <InfoRow label="Contact" value={tenant.contactNumber} />
+                  <InfoRow label="Start date" value={formatShortDate(tenant.startDate)} />
+                  <InfoRow label="Due date" value={formatShortDate(tenant.dueDate)} />
+                </>
+              )}
             </View>
 
-            <PhotoCard
-              label="Valid ID"
-              uri={tenant.idImageUri}
-              error={documentLoadErrors.id}
-              onPress={(uri) => {
-                setViewerDocumentKind('id');
-                setViewerUri(uri);
-              }}
-              onReplace={() => openReplaceModal('id')}
-              onError={() => void retryDocument('id')}
-              onLoad={() => {
-                setDocumentRetryCount((current) => ({ ...current, id: 0 }));
-                setDocumentLoadErrors((current) => ({ ...current, id: undefined }));
-              }}
-              onRetry={() => void retryDocument('id', true)}
-            />
-            <PhotoCard
-              label="Contract"
-              uri={tenant.contractImageUri}
-              error={documentLoadErrors.agreement}
-              onPress={(uri) => {
-                setViewerDocumentKind('agreement');
-                setViewerUri(uri);
-              }}
-              onReplace={() => openReplaceModal('agreement')}
-              onError={() => void retryDocument('agreement')}
-              onLoad={() => {
-                setDocumentRetryCount((current) => ({ ...current, agreement: 0 }));
-                setDocumentLoadErrors((current) => ({ ...current, agreement: undefined }));
-              }}
-              onRetry={() => void retryDocument('agreement', true)}
-            />
-            {replacementNotice && (
-              <Text accessibilityLiveRegion="polite" style={styles.replacementNotice}>
-                {replacementNotice}
-              </Text>
+            {tenant ? (
+              <>
+                <PhotoCard
+                  label="Valid ID"
+                  uri={tenant.idImageUri}
+                  error={documentLoadErrors.id}
+                  onPress={(uri) => {
+                    setViewerDocumentKind('id');
+                    setViewerUri(uri);
+                  }}
+                  onReplace={() => openReplaceModal('id')}
+                  onError={() => void retryDocument('id')}
+                  onLoad={() => {
+                    setDocumentRetryCount((current) => ({ ...current, id: 0 }));
+                    setDocumentLoadErrors((current) => ({ ...current, id: undefined }));
+                  }}
+                  onRetry={() => void retryDocument('id', true)}
+                />
+                <PhotoCard
+                  label="Contract"
+                  uri={tenant.contractImageUri}
+                  error={documentLoadErrors.agreement}
+                  onPress={(uri) => {
+                    setViewerDocumentKind('agreement');
+                    setViewerUri(uri);
+                  }}
+                  onReplace={() => openReplaceModal('agreement')}
+                  onError={() => void retryDocument('agreement')}
+                  onLoad={() => {
+                    setDocumentRetryCount((current) => ({ ...current, agreement: 0 }));
+                    setDocumentLoadErrors((current) => ({ ...current, agreement: undefined }));
+                  }}
+                  onRetry={() => void retryDocument('agreement', true)}
+                />
+                {replacementNotice && (
+                  <Text accessibilityLiveRegion="polite" style={styles.replacementNotice}>
+                    {replacementNotice}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <View style={styles.vacantCard}>
+                <Text style={styles.vacantText}>
+                  This room is vacant. You can register a tenant when you are ready.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push(`/bh/${room.boardingHouseId}/room/${room.id}/tenant`)}
+                  style={styles.outlinedButton}>
+                  <Text style={styles.outlinedButtonLabel}>Register tenant</Text>
+                </Pressable>
+              </View>
             )}
+
+            <View style={styles.meterCard}>
+              <View style={styles.meterHeading}>
+                <View style={styles.meterIcon}>
+                  <Ionicons name="flash" size={22} color="#2563EB" />
+                </View>
+                <Text style={styles.meterTitle}>Electricity meter</Text>
+              </View>
+
+              {isLoadingMeterReadings ? (
+                <ActivityIndicator color="#2563EB" />
+              ) : meterReadingsError ? (
+                <View style={styles.meterState}>
+                  <Text accessibilityLiveRegion="polite" style={styles.meterError}>
+                    {meterReadingsError}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void refreshMeterReadings()}
+                    style={styles.retryButton}>
+                    <Text style={styles.retryLabel}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : latestMeterReading ? (
+                <>
+                  <View style={styles.latestReading}>
+                    <Text style={styles.latestLabel}>Latest reading</Text>
+                    <Text style={styles.latestValue}>
+                      {latestMeterReading.value.toLocaleString(undefined, {
+                        maximumFractionDigits: 20,
+                      })}{' '}
+                      kWh
+                    </Text>
+                    <Text style={styles.latestDate}>
+                      {formatShortDate(latestMeterReading.readingAt)}
+                    </Text>
+                  </View>
+                  {tenant && !meterReadings.some((reading) => reading.readingAt === tenant.startDate) ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() =>
+                        router.push(
+                          `/bh/${room.boardingHouseId}/room/${room.id}/meter-reading`,
+                        )
+                      }
+                      style={styles.outlinedButton}>
+                      <Text style={styles.outlinedButtonLabel}>Record move-in opening reading</Text>
+                    </Pressable>
+                  ) : occupied ? (
+                    <Text style={styles.meterWarningText}>
+                      Enter scheduled present readings from the Monthly Bill so usage is calculated
+                      and attached to the correct bill.
+                    </Text>
+                  ) : (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() =>
+                        router.push(
+                          `/bh/${room.boardingHouseId}/room/${room.id}/meter-reading`,
+                        )
+                      }
+                      style={styles.outlinedButton}>
+                      <Text style={styles.outlinedButtonLabel}>Record new reading</Text>
+                    </Pressable>
+                  )}
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() =>
+                      router.push(
+                        `/bh/${room.boardingHouseId}/room/${room.id}/meter-history`,
+                      )
+                    }
+                    style={styles.historyLink}>
+                    <Ionicons name="reader-outline" size={18} color="#1E3A8A" />
+                    <Text style={styles.historyLinkLabel}>View reading history</Text>
+                    <Ionicons name="chevron-forward" size={19} color="#64748B" />
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.noReadingText}>
+                    No meter reading has been recorded yet.
+                  </Text>
+                  <View style={styles.meterWarning}>
+                    <Ionicons name="information-circle-outline" size={18} color="#D97706" />
+                    <Text style={styles.meterWarningText}>
+                      A baseline is needed to calculate electricity consumption.
+                    </Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() =>
+                      router.push(
+                        `/bh/${room.boardingHouseId}/room/${room.id}/meter-reading`,
+                      )
+                    }
+                    style={styles.outlinedButton}>
+                    <Text style={styles.outlinedButtonLabel}>
+                      {occupied ? 'Record move-in opening reading' : 'Record meter reading'}
+                    </Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
           </>
+        ) : !occupied ? (
+          <Text style={styles.emptyText}>No tenant billing history is available for this room yet.</Text>
         ) : isLoadingBills ? (
           <ActivityIndicator color="#2563EB" size="large" />
         ) : billsError ? (
@@ -300,6 +482,7 @@ export default function RoomDetailScreen() {
           </View>
         </View>
       </Modal>
+
     </View>
   );
 }
@@ -449,6 +632,125 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 2,
+  },
+  vacantCard: {
+    padding: 16,
+    gap: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  vacantText: {
+    color: '#475569',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  meterCard: {
+    padding: 16,
+    gap: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  meterHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  meterIcon: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: '#EFF6FF',
+  },
+  meterTitle: {
+    color: '#1E3A8A',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  meterState: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  meterError: {
+    color: '#B42318',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  latestReading: {
+    padding: 14,
+    gap: 4,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+  },
+  latestLabel: {
+    color: '#475569',
+    fontSize: 13,
+  },
+  latestValue: {
+    color: '#1E3A8A',
+    fontSize: 23,
+    fontWeight: '700',
+  },
+  latestDate: {
+    color: '#64748B',
+    fontSize: 13,
+  },
+  noReadingText: {
+    color: '#334155',
+    fontSize: 14,
+  },
+  meterWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#FFF7E6',
+  },
+  meterWarningText: {
+    flex: 1,
+    color: '#7C4A03',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  outlinedButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+  },
+  outlinedButtonLabel: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  historyLink: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  historyLinkLabel: {
+    flex: 1,
+    color: '#1E3A8A',
+    fontSize: 13,
+    fontWeight: '600',
   },
   infoRow: {
     flexDirection: 'row',

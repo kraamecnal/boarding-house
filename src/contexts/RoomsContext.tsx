@@ -42,13 +42,20 @@ export type Room = {
 
 export type OccupiedRoom = Room & { status: 'occupied'; tenant: Tenant };
 
-type NewRoomInput = Pick<Room, 'boardingHouseId' | 'roomName' | 'monthlyRate'>;
+type NewRoomInput = Pick<
+  Room,
+  'boardingHouseId' | 'roomName' | 'monthlyRate'
+> & {
+  requestId: string;
+  initialMeterReading: { value: number; readingAt: string } | null;
+};
 export type NewTenantInput = {
   firstName: string;
   lastName: string;
   email: string;
   contactNumber: string;
   startDate: string;
+  openingMeterReading: number | null;
   idImage: TenantDocumentImage;
   contractImage: TenantDocumentImage;
 };
@@ -383,28 +390,43 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
             room.roomName.trim().toLowerCase() === roomName.trim().toLowerCase(),
         ),
       addRoom: async (input) => {
-        const { data, error } = await getSupabaseClient()
-          .from('rooms')
-          .insert({
-            boarding_house_id: input.boardingHouseId,
-            room_name: input.roomName.trim(),
-            monthly_rate: input.monthlyRate,
-          })
-          .select('room_id, boarding_house_id, room_name, monthly_rate, is_occupied, last_updated_at')
-          .single();
+        const client = getSupabaseClient();
+        const parameters = {
+          p_boarding_house_id: input.boardingHouseId,
+          p_room_name: input.roomName.trim(),
+          p_monthly_rate: input.monthlyRate,
+          p_request_id: input.requestId,
+          p_initial_reading_value: input.initialMeterReading?.value ?? null,
+          p_initial_reading_at: input.initialMeterReading?.readingAt ?? null,
+        };
+        let result = await client.rpc('create_room_with_meter_reading', parameters);
+        if (result.error?.code === 'PGRST202') {
+          result = await client.rpc('create_room_with_meter_reading', {
+            ...parameters,
+            p_meter_reading_day: 15,
+          });
+        }
+        const { data: roomId, error } = result;
         if (error) throw error;
-        setRooms((current) => [
-          {
-            id: data.room_id,
-            boardingHouseId: data.boarding_house_id,
-            roomName: data.room_name,
-            monthlyRate: Number(data.monthly_rate),
-            status: data.is_occupied ? 'occupied' : 'vacant',
-            tenant: null,
-            createdAt: data.last_updated_at,
-          },
-          ...current,
-        ]);
+        if (typeof roomId !== 'string') {
+          throw new Error('The room was saved without returning its identifier.');
+        }
+        setRooms((current) =>
+          current.some((room) => room.id === roomId)
+            ? current
+            : [
+                {
+                  id: roomId,
+                  boardingHouseId: input.boardingHouseId,
+                  roomName: input.roomName.trim(),
+                  monthlyRate: input.monthlyRate,
+                  status: 'vacant',
+                  tenant: null,
+                  createdAt: new Date().toISOString(),
+                },
+                ...current,
+              ],
+        );
       },
       assignTenant: async (roomId, input, customCharges = {}, onDocumentUpload) => {
         if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
@@ -438,16 +460,20 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
               ? []
               : [{ item_type: key, unit_price: Number(rate) }];
           });
-          const { data: tenancyId, error } = await getSupabaseClient().rpc('register_tenancy', {
-            p_room_id: roomId,
-            p_name: `${input.firstName.trim()} ${input.lastName.trim()}`.trim(),
-            p_contact_number: input.contactNumber.trim(),
-            p_email_address: input.email.trim(),
-            p_id_photo_url: idPhotoPath,
-            p_agreement_photo_url: contractPath,
-            p_move_in_date: input.startDate,
-            p_custom_charges: selectedCharges,
-          });
+          const { data: tenancyId, error } = await getSupabaseClient().rpc(
+            'register_tenancy_with_opening_reading',
+            {
+              p_room_id: roomId,
+              p_name: `${input.firstName.trim()} ${input.lastName.trim()}`.trim(),
+              p_contact_number: input.contactNumber.trim(),
+              p_email_address: input.email.trim(),
+              p_id_photo_url: idPhotoPath,
+              p_agreement_photo_url: contractPath,
+              p_move_in_date: input.startDate,
+              p_custom_charges: selectedCharges,
+              p_opening_reading_value: input.openingMeterReading,
+            },
+          );
           if (error) throw error;
           if (!tenancyId) throw new Error('The tenancy was saved without returning its identifier.');
           const tenant: Tenant = {

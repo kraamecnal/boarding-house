@@ -5,30 +5,51 @@ import type { BillRecord, BillStatus } from '@/contexts/BillsContext';
 import type { OccupiedRoom } from '@/contexts/RoomsContext';
 import { FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
 import { computeTotals, formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
+import type { BillMeterContext } from '@/utils/meterBilling';
 
 type Props = {
   room: OccupiedRoom;
   record: BillRecord;
-  onChangeElectricity: (text: string) => void;
-  electricityValue?: string;
-  onCommitElectricity?: (text: string) => void;
+  meterContext: BillMeterContext | null;
+  meterContextLoading: boolean;
+  meterContextError: string | null;
+  meterReadingValue: string;
+  isSavingMeterReading: boolean;
+  onChangeMeterReading: (text: string) => void;
+  onSaveMeterReading: () => void;
   onChangeStatus: (status: BillStatus) => void;
 };
 
 export default function BillStatement({
   room,
   record,
-  onChangeElectricity,
-  electricityValue,
-  onCommitElectricity,
+  meterContext,
+  meterContextLoading,
+  meterContextError,
+  meterReadingValue,
+  isSavingMeterReading,
+  onChangeMeterReading,
+  onSaveMeterReading,
   onChangeStatus,
 }: Props) {
   const totals = computeTotals(room.monthlyRate, record.electricity);
   const meteredElectricity = record.items.some((item) => item.itemType === 'electricity');
+  const manualElectricity = record.items.some(
+    (item) => item.itemType === 'adjustment' && item.description === 'Electricity',
+  );
+  const electricityItem = record.items.find((item) => item.itemType === 'electricity');
   const displayItems = record.items.filter(
-    (item) => !(item.itemType === 'adjustment' && item.description === 'Electricity'),
+    (item) =>
+      item.itemType !== 'electricity' &&
+      !(item.itemType === 'adjustment' && item.description === 'Electricity'),
   );
   const totalAmount = record.billId ? record.totalAmount : totals.total;
+  const canRecordMeterReading =
+    Boolean(record.billId) &&
+    !record.isFinalized &&
+    record.status !== 'paid' &&
+    !meteredElectricity &&
+    !manualElectricity;
 
   return (
     <View style={styles.sheet}>
@@ -60,11 +81,6 @@ export default function BillStatement({
             <Line
               key={item.id}
               label={itemLabel(item.itemType, item.description)}
-              detail={
-                item.itemType === 'electricity'
-                  ? `${item.quantity} kWh × ${formatPeso(item.unitPrice)}`
-                  : undefined
-              }
               value={formatPeso(item.amount)}
             />
           ))
@@ -80,27 +96,213 @@ export default function BillStatement({
 
         <View style={styles.gap} />
 
-        {!meteredElectricity && (
-          <View style={styles.lineRow}>
-            <Text style={[styles.text, styles.lineLabel]}>Electricity</Text>
-            <View style={styles.amountBox}>
-              <Text style={styles.peso}>₱</Text>
-              <TextInput
-                style={styles.amountInput}
-                value={electricityValue ?? record.electricity}
-                onChangeText={onChangeElectricity}
-                onEndEditing={() =>
-                  onCommitElectricity?.(electricityValue ?? record.electricity)
-                }
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor="#8A94A6"
-                selectTextOnFocus
-                editable={Boolean(record.billId) && !record.isFinalized && record.status !== 'paid'}
-                maxLength={10}
-                accessibilityLabel="Electricity charge in pesos"
-              />
-            </View>
+        {manualElectricity && !meteredElectricity ? (
+          <Line
+            label="Electricity"
+            value={formatPeso(
+              record.items.find(
+                (item) => item.itemType === 'adjustment' && item.description === 'Electricity',
+              )?.amount ?? 0,
+            )}
+          />
+        ) : (
+          <View style={styles.electricitySection}>
+            <Text style={styles.electricityTitle}>Electricity</Text>
+            {meteredElectricity ? (
+              <>
+                {electricityItem ? (
+                  <Line
+                    label="Electricity Charge"
+                    value={formatPeso(electricityItem.amount)}
+                    bold
+                  />
+                ) : (
+                  <Text style={styles.electricityMessage}>
+                    Electricity charge unavailable.
+                  </Text>
+                )}
+                {meterContextLoading ? (
+                  <Text style={styles.electricityMessage}>Loading readings…</Text>
+                ) : meterContextError ? (
+                  <Text accessibilityLiveRegion="polite" style={styles.electricityMessage}>
+                    Meter readings unavailable.
+                  </Text>
+                ) : meterContext?.previousReading && meterContext.currentReading ? (
+                  <>
+                    <Line
+                      label="Previous Reading"
+                      value={`${meterContext.previousReading.value.toLocaleString()} kWh`}
+                    />
+                    <Line
+                      label="Present Reading"
+                      value={`${meterContext.currentReading.value.toLocaleString()} kWh`}
+                    />
+                    <Line
+                      label="Electricity Consumed"
+                      value={`${(
+                        meterContext.currentReading.value - meterContext.previousReading.value
+                      ).toLocaleString()} kWh`}
+                    />
+                    {electricityItem ? (
+                      <Line
+                        label="Rate per kWh"
+                        value={formatPeso(electricityItem.unitPrice)}
+                      />
+                    ) : (
+                      <Text style={styles.electricityMessage}>
+                        Configure an electricity rate to continue.
+                      </Text>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {meterContext?.previousReading ? (
+                      <Line
+                        label="Previous Reading"
+                        value={`${meterContext.previousReading.value.toLocaleString()} kWh`}
+                      />
+                    ) : null}
+                    <Text style={styles.electricityMessage}>
+                      {meterContext?.previousReading
+                        ? meterContext.currentReading
+                          ? 'Electricity details unavailable.'
+                          : 'Present reading unavailable.'
+                        : 'Meter readings unavailable.'}
+                    </Text>
+                    {canRecordMeterReading &&
+                      meterContext &&
+                      meterContext.rate !== null &&
+                      meterContext?.previousReading &&
+                      meterContext.readingDateValid && (
+                        <>
+                          {!meterContext.currentReading && (
+                            <TextInput
+                              accessibilityLabel="Present meter reading in kilowatt-hours"
+                              style={styles.meterInput}
+                              value={meterReadingValue}
+                              onChangeText={onChangeMeterReading}
+                              keyboardType="decimal-pad"
+                              placeholder="Present reading (kWh)"
+                              placeholderTextColor="#8A94A6"
+                              editable={!isSavingMeterReading}
+                            />
+                          )}
+                          {meterContext.rate === null ? (
+                            <Text style={styles.electricityMessage}>
+                              Configure an electricity rate to continue.
+                            </Text>
+                          ) : (
+                            <Line
+                              label="Rate per kWh"
+                              value={formatPeso(meterContext.rate)}
+                            />
+                          )}
+                          {meterContext.currentReading && electricityItem === undefined && (
+                            <Text style={styles.electricityMessage}>
+                              Electricity charge unavailable.
+                            </Text>
+                          )}
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityState={{ disabled: isSavingMeterReading }}
+                            disabled={isSavingMeterReading}
+                            onPress={onSaveMeterReading}
+                            style={[
+                              styles.meterButton,
+                              isSavingMeterReading && styles.meterButtonDisabled,
+                            ]}>
+                            <Text style={styles.meterButtonLabel}>
+                              {isSavingMeterReading
+                                ? 'Saving…'
+                                : meterContext.currentReading
+                                  ? 'Calculate charge'
+                                  : 'Save reading'}
+                            </Text>
+                          </Pressable>
+                        </>
+                      )}
+                  </>
+                )}
+              </>
+            ) : !record.billId ? (
+              <Text style={styles.electricityMessage}>No electricity charge.</Text>
+            ) : meterContextLoading ? (
+              <Text style={styles.electricityMessage}>Loading readings…</Text>
+            ) : meterContextError ? (
+              <Text accessibilityLiveRegion="polite" style={styles.electricityMessage}>
+                Meter readings unavailable.
+              </Text>
+            ) : !meterContext?.previousReading ? (
+              <Text style={styles.electricityMessage}>Previous reading unavailable.</Text>
+            ) : !meterContext.readingDateValid ? (
+              <Text style={styles.electricityMessage}>No present reading for this bill.</Text>
+            ) : (
+              <>
+                <Line
+                  label="Previous Reading"
+                  value={`${meterContext.previousReading.value.toLocaleString()} kWh`}
+                />
+                {meterContext.currentReading ? (
+                  <>
+                    <Line
+                      label="Present Reading"
+                      value={`${meterContext.currentReading.value.toLocaleString()} kWh`}
+                    />
+                    <Line
+                      label="Electricity Consumed"
+                      value={`${(
+                        meterContext.currentReading.value - meterContext.previousReading.value
+                      ).toLocaleString()} kWh`}
+                    />
+                  </>
+                ) : (
+                  <Text style={styles.electricityMessage}>Present reading unavailable.</Text>
+                )}
+                {meterContext.rate === null ? (
+                  <Text style={styles.electricityMessage}>
+                    Configure an electricity rate to continue.
+                  </Text>
+                ) : (
+                  <Line label="Rate per kWh" value={formatPeso(meterContext.rate)} />
+                )}
+                <Text style={styles.electricityMessage}>Electricity charge unavailable.</Text>
+                {canRecordMeterReading &&
+                  meterContext &&
+                  meterContext.rate !== null && (
+                    <>
+                      {!meterContext.currentReading && (
+                        <TextInput
+                          accessibilityLabel="Present meter reading in kilowatt-hours"
+                          style={styles.meterInput}
+                          value={meterReadingValue}
+                          onChangeText={onChangeMeterReading}
+                          keyboardType="decimal-pad"
+                          placeholder="Present reading (kWh)"
+                          placeholderTextColor="#8A94A6"
+                          editable={!isSavingMeterReading}
+                        />
+                      )}
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: isSavingMeterReading }}
+                        disabled={isSavingMeterReading}
+                        onPress={onSaveMeterReading}
+                        style={[
+                          styles.meterButton,
+                          isSavingMeterReading && styles.meterButtonDisabled,
+                        ]}>
+                        <Text style={styles.meterButtonLabel}>
+                          {isSavingMeterReading
+                            ? 'Saving…'
+                            : meterContext.currentReading
+                              ? 'Calculate charge'
+                              : 'Save reading'}
+                        </Text>
+                      </Pressable>
+                    </>
+                  )}
+              </>
+            )}
           </View>
         )}
         {!record.billId && (
@@ -294,6 +496,45 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
   },
+  electricitySection: {
+    gap: 6,
+  },
+  electricityTitle: {
+    color: '#1A2B3C',
+    fontFamily: MONO,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  electricityMessage: {
+    color: '#64748B',
+    fontFamily: MONO,
+    fontSize: 11,
+  },
+  meterInput: {
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#FFFFFF',
+    color: '#1A2B3C',
+    fontSize: 15,
+  },
+  meterButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    backgroundColor: '#2563EB',
+  },
+  meterButtonDisabled: {
+    opacity: 0.6,
+  },
+  meterButtonLabel: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   lineLabel: {
     flexShrink: 1,
   },
@@ -305,31 +546,6 @@ const styles = StyleSheet.create({
     fontFamily: MONO,
     fontSize: 10,
     color: '#64748B',
-  },
-  amountBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: 136,
-    borderWidth: 1,
-    borderColor: '#1A2B3C',
-    borderRadius: 6,
-    backgroundColor: '#F7F8FA',
-    paddingHorizontal: 8,
-  },
-  peso: {
-    fontFamily: MONO,
-    fontSize: 13,
-    color: '#1A2B3C',
-  },
-  amountInput: {
-    flex: 1,
-    fontFamily: MONO,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1A2B3C',
-    textAlign: 'right',
-    paddingVertical: 6,
-    paddingHorizontal: 4,
   },
   sumRule: {
     alignSelf: 'flex-end',
