@@ -68,7 +68,7 @@ export default function DashboardDrawer({ visible, onClose }: Props) {
     });
   };
 
-  const navigateTo = (path: '/billing-charges' | '/profile') => {
+  const navigateTo = (path: '/billing-charges' | '/profile' | '/tenants') => {
     closeDrawer(() => router.push(path));
   };
 
@@ -100,14 +100,19 @@ export default function DashboardDrawer({ visible, onClose }: Props) {
           ]}>
           <Text style={styles.title}>Menu</Text>
           <DrawerItem
-            icon="receipt-outline"
-            label="Billing charges"
-            onPress={() => navigateTo('/billing-charges')}
-          />
-          <DrawerItem
             icon="person-outline"
             label="Profile"
             onPress={() => navigateTo('/profile')}
+          />
+          <DrawerItem
+            icon="people-outline"
+            label="Tenants"
+            onPress={() => navigateTo('/tenants')}
+          />
+          <DrawerItem
+            icon="receipt-outline"
+            label="Billing Charges"
+            onPress={() => navigateTo('/billing-charges')}
           />
         </Animated.View>
       </View>
