@@ -183,12 +183,12 @@ export default function RegisterTenantScreen() {
       ? parseMeterReadingInput(openingMeterReading)
       : null;
     if (hasStarted && openingMeterReading.trim() && openingReadingValue === null) {
-      return Alert.alert('Invalid reading', 'Enter a valid nonnegative opening meter reading.');
+      return Alert.alert('Invalid reading', 'Enter a valid nonnegative move-in reading.');
     }
     if (hasStarted && openingReadingValue === null) {
       return Alert.alert(
-        'Opening reading required',
-        'Enter the meter value on the move-in date before registering a tenant who has already moved in.',
+        'Move-in reading required',
+        'Enter the meter value from the move-in date before registering a tenant who has already moved in.',
       );
     }
     if (!idImage) {
@@ -244,7 +244,12 @@ export default function RegisterTenantScreen() {
         router.back();
       }
     } catch (error: unknown) {
-      setSubmitError(error instanceof Error ? error.message : 'Could not register this tenant.');
+      const message = error instanceof Error ? error.message : 'Could not register this tenant.';
+      setSubmitError(
+        message.includes('The reading date must be later than the previous reading')
+          ? 'The move-in date you selected is before this room’s latest meter reading. Check the meter history and move-in date, then try again.'
+          : message,
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -405,26 +410,26 @@ export default function RegisterTenantScreen() {
           <Ionicons name="calendar-outline" size={20} color="#1A2B3C" />
         </Pressable>
 
-        <Text style={styles.label}>Opening meter reading (kWh)</Text>
+        <Text style={styles.label}>Move-in reading (kWh)</Text>
         {startDate && toIsoDate(startDate) <= toIsoDate(new Date()) ? (
           <>
             <TextInput
-              accessibilityLabel="Opening meter reading in kilowatt-hours"
+              accessibilityLabel="Move-in reading in kilowatt-hours"
               style={styles.input}
               value={openingMeterReading}
               onChangeText={(text) => setOpeningMeterReading(sanitizeMeterReadingInput(text))}
               keyboardType="decimal-pad"
-              placeholder="Value shown on the meter at move-in"
+              placeholder="Number shown on the electricity meter"
               placeholderTextColor="#8A94A6"
             />
             <Text style={styles.readingHelper}>
-              This reading is saved on the move-in date and prevents electricity used by a previous
-              tenant from being billed to this tenancy.
+              Enter the number shown on the electricity meter on the move-in date. This is the
+              tenant's starting point, so they are not charged for earlier use.
             </Text>
           </>
         ) : (
           <Text style={styles.readingHelper}>
-            For a future move-in, record the opening reading on the move-in date before billing
+            For a future move-in, record the meter number on the move-in date before billing
             electricity.
           </Text>
         )}

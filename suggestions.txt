@@ -1,2 +1,8 @@
-to be fixed:
-On registering a new tenant, remove the "Opening meter reading (kWh)" part.
+to do:
+1. ask the client what is the process of tenant moving out
+
+
+finish setting up New Application Identifier on Expo dashboard (took a break before step 5 && continue at step 5 after break)
+1. application Identifier (TRUE) -> com.hoynaayiring.inkeeper
+2. Android upload keystore (FALSE)
+3. Google Service Account Key (FALSE)

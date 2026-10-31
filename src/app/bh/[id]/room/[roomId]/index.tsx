@@ -311,7 +311,7 @@ export default function RoomDetailScreen() {
                         )
                       }
                       style={styles.outlinedButton}>
-                      <Text style={styles.outlinedButtonLabel}>Record move-in opening reading</Text>
+                      <Text style={styles.outlinedButtonLabel}>Record move-in reading</Text>
                     </Pressable>
                   ) : occupied ? (
                     <Text style={styles.meterWarningText}>
@@ -363,7 +363,7 @@ export default function RoomDetailScreen() {
                     }
                     style={styles.outlinedButton}>
                     <Text style={styles.outlinedButtonLabel}>
-                      {occupied ? 'Record move-in opening reading' : 'Record meter reading'}
+                      {occupied ? 'Record move-in reading' : 'Record meter reading'}
                     </Text>
                   </Pressable>
                 </>

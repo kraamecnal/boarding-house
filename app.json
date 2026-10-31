@@ -17,7 +17,11 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "package": "com.hoynaayiring.inkeeper",
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"   //remove line? The scope did not mention any "audio"
+      ]
     },
     "web": {
       "output": "static",
@@ -43,12 +47,22 @@
       "expo-font",
       "expo-status-bar",
       "expo-web-browser",
-      "@react-native-community/datetimepicker"
-  
+      "@react-native-community/datetimepicker",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "9600dc17-762c-4c92-9243-e63bda5f9772"
+      }
     }
   }
 }

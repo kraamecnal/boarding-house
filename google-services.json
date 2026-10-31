@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "876072309310",
+    "project_id": "inkeeper-app",
+    "storage_bucket": "inkeeper-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:876072309310:android:00f2f7f764191f5a3f376f",
+        "android_client_info": {
+          "package_name": "com.hoynaayiring.inkeeper"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDis0vH9wL1wfaPJ-lOnwCjsYO5XpjXh2s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
