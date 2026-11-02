@@ -2,7 +2,11 @@ to do:
 1. ask the client what is the process of tenant moving out
 
 
-finish setting up New Application Identifier on Expo dashboard (took a break before step 5 && continue at step 5 after break)
-1. application Identifier (TRUE) -> com.hoynaayiring.inkeeper
-2. Android upload keystore (FALSE)
-3. Google Service Account Key (FALSE)
+Push Notifications — Remaining Tasks
+The basic Expo setup is already in place. Please finish the following:
+
+Configure the Android push-notification credentials in Expo/EAS, and make sure the Firebase file is available to cloud builds.
+Add app code to ask the user for permission, get their push token, and save it securely.
+Set up a backend service to send notifications when we decide they’re needed.
+Build the app and test that a notification arrives on a physical Android phone.
+Done when: the app can request permission, register a device, send a test notification, and receive it successfully.
