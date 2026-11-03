@@ -3,6 +3,7 @@ import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
 import { Platform } from 'react-native';
 
+import { removeExpoPushToken } from '@/utils/notifications';
 import { getSupabaseClient, isSupabaseConfigured } from '@/utils/supabase';
 
 export type AuthMode = 'sign-in' | 'sign-up';
@@ -123,9 +124,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
 
   const signOut = useCallback(async () => {
+    if (session?.user.id) await removeExpoPushToken(session.user.id);
     const { error } = await getSupabaseClient().auth.signOut();
     if (error) throw error;
-  }, []);
+  }, [session]);
 
   /**
    * Checks the current user's password without touching the real session.

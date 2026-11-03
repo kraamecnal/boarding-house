@@ -1,15 +1,31 @@
 import Constants from 'expo-constants';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { useNotifications } from '@/contexts/NotificationsContext';
 
 type SettingsSection = 'about' | 'version';
 
 export default function SettingsScreen() {
   const { signOut } = useAuth();
+  const {
+    enablePushNotifications,
+    pushError,
+    pushPermissionStatus,
+  } = useNotifications();
   const [section, setSection] = useState<SettingsSection>('about');
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isEnablingPush, setIsEnablingPush] = useState(false);
+  const [pushActionError, setPushActionError] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const version = Constants.expoConfig?.version ?? 'Unavailable';
 
@@ -22,6 +38,20 @@ export default function SettingsScreen() {
       setSignOutError(error instanceof Error ? error.message : 'Unable to sign out. Try again.');
     } finally {
       setIsSigningOut(false);
+    }
+  };
+
+  const handleEnablePush = async () => {
+    setPushActionError(null);
+    setIsEnablingPush(true);
+    try {
+      await enablePushNotifications();
+    } catch (error: unknown) {
+      setPushActionError(
+        error instanceof Error ? error.message : 'Could not enable push notifications.',
+      );
+    } finally {
+      setIsEnablingPush(false);
     }
   };
 
@@ -64,6 +94,34 @@ export default function SettingsScreen() {
           </Text>
         </View>
       )}
+      <View style={styles.card}>
+        <Text style={styles.heading}>Push notifications</Text>
+        <Text style={styles.body}>
+          {Platform.OS === 'web'
+            ? 'Push notifications are unavailable on web. In-app notifications remain available.'
+            : pushActionError ?? pushError ??
+              (pushPermissionStatus === 'granted'
+                ? 'Push alerts are enabled for this device.'
+                : 'Enable push alerts for this device. In-app notifications remain available.')}
+        </Text>
+        {Platform.OS !== 'web' &&
+          pushPermissionStatus !== 'unsupported' &&
+          (pushPermissionStatus !== 'granted' || pushError !== null) && (
+            <Pressable
+              accessibilityRole="button"
+              disabled={isEnablingPush}
+              onPress={() => void handleEnablePush()}
+              style={styles.pushButton}>
+              {isEnablingPush ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.pushButtonLabel}>
+                  {pushPermissionStatus === 'granted' ? 'Retry push setup' : 'Enable push alerts'}
+                </Text>
+              )}
+            </Pressable>
+          )}
+      </View>
       {signOutError && <Text accessibilityLiveRegion="polite" style={styles.error}>{signOutError}</Text>}
       <Pressable
         accessibilityRole="button"
@@ -178,6 +236,18 @@ const styles = StyleSheet.create({
   signOutLabel: {
     color: '#B42318',
     fontSize: 15,
+    fontWeight: '700',
+  },
+  pushButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+  },
+  pushButtonLabel: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '700',
   },
 });

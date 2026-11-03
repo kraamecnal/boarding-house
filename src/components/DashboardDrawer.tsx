@@ -68,7 +68,7 @@ export default function DashboardDrawer({ visible, onClose }: Props) {
     });
   };
 
-  const navigateTo = (path: '/billing-charges' | '/profile' | '/tenants') => {
+  const navigateTo = (path: '/billing-charges' | '/profile' | '/settings' | '/tenants') => {
     closeDrawer(() => router.push(path));
   };
 
@@ -113,6 +113,11 @@ export default function DashboardDrawer({ visible, onClose }: Props) {
             icon="receipt-outline"
             label="Billing Charges"
             onPress={() => navigateTo('/billing-charges')}
+          />
+          <DrawerItem
+            icon="options-outline"
+            label="Settings"
+            onPress={() => navigateTo('/settings')}
           />
         </Animated.View>
       </View>

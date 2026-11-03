@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  Alert,
   ActivityIndicator,
   Pressable,
   ScrollView,
@@ -16,6 +15,7 @@ import DashboardDrawer from '@/components/DashboardDrawer';
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBills } from '@/contexts/BillsContext';
+import { useNotifications } from '@/contexts/NotificationsContext';
 import { useRooms } from '@/contexts/RoomsContext';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
 import { computeDues, type DueItem } from '@/utils/dues';
@@ -24,6 +24,7 @@ export default function ManageScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const { unreadCount } = useNotifications();
   const {
     rooms,
     isLoading: isLoadingRooms,
@@ -58,11 +59,22 @@ export default function ManageScreen() {
             <Ionicons color={DashboardColors.dark} name="settings-outline" size={24} />
           </Pressable>
           <Pressable
-            accessibilityLabel="Notifications"
+            accessibilityLabel={
+              unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'
+            }
             accessibilityRole="button"
-            onPress={() => Alert.alert('Notifications', 'Notifications are not available yet.')}
+            onPress={() => router.push('/notifications')}
             style={styles.headerButton}>
-            <Ionicons color={DashboardColors.dark} name="notifications-outline" size={23} />
+            <View>
+              <Ionicons color={DashboardColors.dark} name="notifications-outline" size={23} />
+              {unreadCount > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeLabel}>
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </Text>
+                </View>
+              )}
+            </View>
           </Pressable>
         </View>
 
@@ -180,6 +192,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 22,
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -7,
+    right: -9,
+    minWidth: 17,
+    height: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderRadius: 9,
+    backgroundColor: '#DC2626',
+  },
+  notificationBadgeLabel: {
+    color: DashboardColors.white,
+    fontSize: 9,
+    fontWeight: '800',
   },
   greeting: {
     marginTop: 4,

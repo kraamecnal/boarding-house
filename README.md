@@ -69,6 +69,46 @@ Rooms have a permanent monthly meter-reading day (default 15; days beyond a mont
 
 The Manage tab shows the dashboard summary. Open the gear menu to visit Billing charges or Profile; the Profile page links to the About and Version information.
 
+## Notifications
+
+The Manage tab's existing bell opens the owner's notification history. In-app entries are created from database events, are scoped to the signed-in owner by RLS, and update through Supabase Realtime. A daily Manila-time `pg_cron` job creates the two-day and due-today bill reminders. Event keys make trigger and scheduled-job inserts idempotent. Electricity charges continue to use the existing meter-reading and rate calculation; notifications only report that workflow.
+
+Apply the new migration after reviewing it, then deploy the push function:
+
+```sh
+npx supabase db push
+npx supabase functions deploy send-notification-push --project-ref <project-ref>
+```
+
+Push delivery requires a development or production native build, granted notification permission, and valid Expo/EAS push credentials for the project. Android remote push is not supported in Expo Go; use a development build to enable it. The app skips push-token/channel initialization in Expo Go while keeping in-app notifications and Realtime updates available, and exposes the limitation in Settings. Push is optional: the notification list and Realtime updates still work when a device has not granted permission. The Edge Function uses the server-side Supabase service-role key and Expo Push Service; neither key nor push credentials belong in the app.
+
+To enable secure database-to-function dispatch, create one random webhook secret and set it as an Edge Function secret:
+
+```sh
+npx supabase secrets set NOTIFICATION_WEBHOOK_SECRET=<random-secret> --project-ref <project-ref>
+```
+
+Store the same secret and the project URL in Supabase Vault (run once in the SQL editor, substituting the actual values):
+
+```sql
+select vault.create_secret('https://<project-ref>.supabase.co', 'notifications_supabase_url');
+select vault.create_secret('<random-secret>', 'notifications_webhook_secret');
+```
+
+The database queues push requests asynchronously through `pg_net`, so a push-service outage does not roll back a bill, tenancy, or notification. The existing `send-bill-reminders` email function and its schedule are separate and unchanged.
+
+### Notification checks
+
+After applying the migration and configuring push:
+
+1. Sign in as an owner and open Manage. Confirm the bell opens the list, shows an empty state when appropriate, and asks for push permission only after choosing **Enable push alerts**.
+2. Register a tenant, generate a bill, add its electricity reading, and mark the bill paid. Confirm the corresponding tenant, bill, reading-required, electricity-charge, and paid notifications appear without refreshing.
+3. Use a bill due in two days and another due today to check the scheduled reminders. Run `select private.create_bill_due_notifications();` twice in the SQL editor and confirm each bill has only one reminder of each type.
+4. Mark one notification read and then mark all read. Confirm the unread badge and read styling update immediately and remain correct after reopening Manage.
+5. Sign in as a second owner and attempt to query/update the first owner's notification ID; RLS must return no row and prevent changes.
+6. Retry the reminder function and repeat event-producing actions where safe. Confirm the `(owner_id, event_key)` uniqueness prevents duplicates.
+7. Disable or invalidate a device push token and verify in-app notification creation still succeeds. Check Edge Function logs for delivery errors; push failures must not interrupt the primary workflow.
+
 ## Get a fresh project
 
 When you're ready, run:

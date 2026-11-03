@@ -6,6 +6,7 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { BillsProvider } from '@/contexts/BillsContext';
 import { BoardingHousesProvider } from '@/contexts/BoardingHousesContext';
+import { NotificationsProvider } from '@/contexts/NotificationsContext';
 import { RoomsProvider } from '@/contexts/RoomsContext';
 
 SplashScreen.preventAutoHideAsync();
@@ -46,6 +47,7 @@ function AppNavigator() {
         <Stack.Screen name="billing-charges" options={{ title: 'Billing charges' }} />
         <Stack.Screen name="profile" options={{ title: 'Profile' }} />
         <Stack.Screen name="tenants" options={{ title: 'Tenants' }} />
+        <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
         <Stack.Screen
           name="register-house"
           options={{ title: 'Register Boarding House', presentation: 'modal' }}
@@ -80,13 +82,15 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
-        <BoardingHousesProvider>
-          <RoomsProvider>
-            <BillsProvider>
-              <AppNavigator />
-            </BillsProvider>
-          </RoomsProvider>
-        </BoardingHousesProvider>
+        <NotificationsProvider>
+          <BoardingHousesProvider>
+            <RoomsProvider>
+              <BillsProvider>
+                <AppNavigator />
+              </BillsProvider>
+            </RoomsProvider>
+          </BoardingHousesProvider>
+        </NotificationsProvider>
       </AuthProvider>
     </ThemeProvider>
   );

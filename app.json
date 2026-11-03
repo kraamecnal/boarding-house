@@ -17,7 +17,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "googleServicesFile": "C:/Users/urian/Documents/all coding sht/InKeeper/boarding-house/google-services.json",
+      "googleServicesFile": "./google-services.json",
       "package": "com.hoynaayiring.inkeeper",
       "predictiveBackGestureEnabled": false,
       "permissions": [

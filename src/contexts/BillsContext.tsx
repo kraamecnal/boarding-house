@@ -230,7 +230,6 @@ export function BillsProvider({ children }: { children: ReactNode }) {
         const { error } = await getSupabaseClient()
           .from('monthly_bill')
           .update({
-            is_paid: status === 'paid',
             paid_at: status === 'paid' ? new Date().toISOString() : null,
           })
           .eq('bill_id', record.billId)
