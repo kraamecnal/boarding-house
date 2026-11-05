@@ -3,14 +3,14 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-rou
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
-  View,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,7 +19,7 @@ import ImageField from '@/components/ImageField';
 import { useBills } from '@/contexts/BillsContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
-import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
+import { formatPeso, formatShortDate, periodLabel, todayIso } from '@/utils/billing';
 import {
   getRoomMeterReadings,
   type MeterReading,
@@ -39,8 +39,15 @@ export default function RoomDetailScreen() {
     refreshTenantDocument,
     reload: reloadRooms,
     replaceTenantDocument,
+    archiveTenant,
   } = useRooms();
-  const { getPaidBills, isLoading: isLoadingBills, loadError: billsError, reload: reloadBills } = useBills();
+  const {
+    getPaidBills,
+    records,
+    isLoading: isLoadingBills,
+    loadError: billsError,
+    reload: reloadBills,
+  } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
 
   const [tab, setTab] = useState<RoomTab>('info');
@@ -60,6 +67,8 @@ export default function RoomDetailScreen() {
   const [meterReadings, setMeterReadings] = useState<MeterReading[]>([]);
   const [isLoadingMeterReadings, setIsLoadingMeterReadings] = useState(true);
   const [meterReadingsError, setMeterReadingsError] = useState<string | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const retryDocument = async (kind: TenantDocumentKind, force = false) => {
     if (!force && (documentRetryCount[kind] ?? 0) >= 1) {
@@ -176,6 +185,46 @@ export default function RoomDetailScreen() {
   const tenant = occupied ? room.tenant : null;
   const paidBills = occupied ? getPaidBills(room.id) : [];
   const latestMeterReading = meterReadings[0];
+  // Only tenants who have already moved in can be archived.
+  const canArchive = !!tenant && tenant.startDate <= todayIso();
+
+  const confirmArchive = async () => {
+    if (isArchiving) return;
+    setIsArchiving(true);
+    setArchiveError(null);
+    try {
+      await archiveTenant(room.id);
+      router.back();
+    } catch (error: unknown) {
+      setArchiveError(
+        error instanceof Error ? error.message : 'Could not archive this tenant. Please try again.',
+      );
+      setIsArchiving(false);
+    }
+  };
+
+  const handleArchive = () => {
+    if (!tenant || isArchiving) return;
+    const unpaid = Object.entries(records).filter(
+      ([key, bill]) =>
+        key.startsWith(`${room.id}|`) && bill.status === 'unpaid' && bill.billId !== null,
+    );
+    const outstanding = unpaid.reduce((sum, [, bill]) => sum + bill.totalAmount, 0);
+    const warning = billsError
+      ? '\n\nUnpaid bills could not be checked right now.'
+      : unpaid.length > 0
+        ? `\n\n${unpaid.length} unpaid ${unpaid.length === 1 ? 'bill' : 'bills'} (${formatPeso(outstanding)}) will stay in the archive.`
+        : '';
+
+    Alert.alert(
+      'Archive tenant?',
+      `${tenant.firstName} ${tenant.lastName}'s information and bill history will move to Archived, and ${room.roomName} will become vacant.${warning}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Archive', style: 'destructive', onPress: () => void confirmArchive() },
+      ],
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -369,6 +418,36 @@ export default function RoomDetailScreen() {
                 </>
               )}
             </View>
+
+            {canArchive && (
+              <View style={styles.archiveSection}>
+                {archiveError && (
+                  <Text accessibilityLiveRegion="polite" style={styles.archiveError}>
+                    {archiveError}
+                  </Text>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isArchiving || isLoadingBills}
+                  onPress={handleArchive}
+                  style={[
+                    styles.archiveButton,
+                    (isArchiving || isLoadingBills) && styles.archiveButtonDisabled,
+                  ]}>
+                  {isArchiving ? (
+                    <ActivityIndicator color="#B42318" />
+                  ) : (
+                    <>
+                      <Ionicons name="archive-outline" size={18} color="#B42318" />
+                      <Text style={styles.archiveButtonLabel}>Archive tenant</Text>
+                    </>
+                  )}
+                </Pressable>
+                <Text style={styles.archiveHint}>
+                  Moves this tenant and their history to Archived and sets the room to vacant.
+                </Text>
+              </View>
+            )}
           </>
         ) : !occupied ? (
           <Text style={styles.emptyText}>No tenant billing history is available for this room yet.</Text>
@@ -891,6 +970,39 @@ const styles = StyleSheet.create({
     color: '#1A2B3C',
     fontSize: 15,
     fontWeight: '700',
+  },
+  archiveSection: {
+    gap: 8,
+    marginTop: 8,
+  },
+  archiveButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#B42318',
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  archiveButtonDisabled: {
+    opacity: 0.5,
+  },
+  archiveButtonLabel: {
+    color: '#B42318',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  archiveHint: {
+    color: '#6B7280',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  archiveError: {
+    color: '#B42318',
+    fontSize: 13,
+    textAlign: 'center',
   },
   historyError: {
     alignItems: 'center',

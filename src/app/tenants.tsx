@@ -23,6 +23,7 @@ type TenantRow = {
   moveInDate: string | null;
   moveOutDate: string | null;
   boardingHouseId?: string;
+  archiveId?: string;
 };
 
 const PAGE_SIZE = 10;
@@ -108,6 +109,7 @@ export default function TenantsScreen() {
           count = resultCount ?? 0;
           rows = (data ?? []).map((row) => ({
             key: row.archive_id,
+            archiveId: row.archive_id,
             name: row.tenant_name,
             roomName: row.room_name ?? 'Room unavailable',
             moveInDate: row.move_in_date,
@@ -174,8 +176,9 @@ export default function TenantsScreen() {
     setPage(1);
   };
 
-  const openTenantHouse = (tenant: TenantRow) => {
-    if (tenant.boardingHouseId) router.push(`/bh/${tenant.boardingHouseId}`);
+  const openTenant = (tenant: TenantRow) => {
+    if (tenant.archiveId) router.push(`/archived/${tenant.archiveId}`);
+    else if (tenant.boardingHouseId) router.push(`/bh/${tenant.boardingHouseId}`);
   };
 
   return (
@@ -242,11 +245,11 @@ export default function TenantsScreen() {
             <Pressable
               accessibilityRole="button"
               key={tenant.key}
-              onPress={() => openTenantHouse(tenant)}
+              onPress={() => openTenant(tenant)}
               style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
               <View style={styles.cardHeader}>
                 <Text numberOfLines={1} style={styles.tenantName}>{tenant.name}</Text>
-                {tenant.boardingHouseId && (
+                {(tenant.boardingHouseId || tenant.archiveId) && (
                   <Ionicons color={DashboardColors.primary} name="chevron-forward" size={20} />
                 )}
               </View>

@@ -1,5 +1,5 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { File as ExpoFile } from 'expo-file-system';
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { CHARGES, type ChargeType } from '@/data/charges';
@@ -117,6 +117,8 @@ type ContextValue = {
     image: TenantDocumentImage,
   ) => Promise<string | null>;
   removeRoom: (id: string) => Promise<void>;
+  /** Moves the current tenant (and their bill history) to Archived and frees the room. */
+  archiveTenant: (roomId: string) => Promise<void>;
 };
 
 export function isOccupied(room: Room): room is OccupiedRoom {
@@ -157,7 +159,7 @@ function isMissingStorageObject(error: unknown): boolean {
   );
 }
 
-async function signedDocumentUrl(path: string | null): Promise<string> {
+export async function signedDocumentUrl(path: string | null): Promise<string> {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
   const pathParts = path.split('/');
@@ -645,6 +647,21 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         const { error } = await getSupabaseClient().from('rooms').delete().eq('room_id', id);
         if (error) throw error;
         setRooms((current) => current.filter((room) => room.id !== id));
+      },
+      archiveTenant: async (roomId) => {
+        const room = rooms.find((item) => item.id === roomId);
+        if (!room || !isOccupied(room)) throw new Error('This room has no tenant to archive.');
+
+        const { error } = await getSupabaseClient().rpc('archive_tenancy', {
+          p_tenancy_id: room.tenant.tenancyId,
+        });
+        if (error) throw error;
+
+        setRooms((current) =>
+          current.map((item) =>
+            item.id === roomId ? { ...item, status: 'vacant', tenant: null } : item,
+          ),
+        );
       },
     }),
     [isLoading, loadError, ownerId, rooms],
