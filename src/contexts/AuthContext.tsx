@@ -1,7 +1,5 @@
 import { createClient, type Session } from '@supabase/supabase-js';
-import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
-import { Platform } from 'react-native';
 
 import { removeExpoPushToken } from '@/utils/notifications';
 import { getSupabaseClient, isSupabaseConfigured } from '@/utils/supabase';
@@ -12,7 +10,8 @@ type AuthContextValue = {
   session: Session | null;
   isLoading: boolean;
   initializationError: string | null;
-  requestMagicLink: (email: string, mode: AuthMode) => Promise<void>;
+  requestEmailOtp: (email: string, mode: AuthMode) => Promise<void>;
+  verifyEmailOtp: (email: string, token: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** True once the user has created the password that confirms bill payments. */
   hasPaymentPassword: boolean;
@@ -64,59 +63,29 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const requestMagicLink = useCallback(async (email: string, mode: AuthMode) => {
-  const configuredRedirect = process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim();
-  
-  if (Platform.OS === 'web' && !__DEV__ && !configuredRedirect) {
-    throw new Error(
-      'Set EXPO_PUBLIC_AUTH_REDIRECT_URL to your production web callback URL before sending sign-in links.',
-    );
-  }
+  const requestEmailOtp = useCallback(async (email: string, mode: AuthMode) => {
+    const { error } = await getSupabaseClient().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: mode === 'sign-up',
+      },
+    });
 
+    if (error) throw error;
+  }, []);
 
-  const emailRedirectTo = configuredRedirect || Linking.createURL('auth/callback');
+  const verifyEmailOtp = useCallback(async (email: string, token: string) => {
+    const { data, error } = await getSupabaseClient().auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    });
 
-/* debugging snippet
-
-  // 1. CHOOSE THE RIGHT LINK FOR EXPO GO VS PRODUCTION
-  let emailRedirectTo = configuredRedirect;
-
-  if (!emailRedirectTo) {
-    if (__DEV__) {
-      // 🔴 FORCE your exact Expo Go local IP network path:
-      emailRedirectTo = 'exp://192.168.100.207:8081/--/auth/callback?_notrack=1'; 
-    } else {
-      emailRedirectTo = Linking.createURL('auth/callback');
+    if (error) throw error;
+    if (!data.session) {
+      throw new Error('The code was accepted, but no sign-in session was created.');
     }
-  }
-
-
-  console.log("👉 ADD THIS EXACT STRING TO SUPABASE:", emailRedirectTo);
-
- end of debugging snippet */
-
-
-
-
-  if (__DEV__) {
-    console.info('Supabase magic-link redirect URI:', emailRedirectTo);
-    if (!configuredRedirect) {
-      console.warn(
-        'EXPO_PUBLIC_AUTH_REDIRECT_URL is not set. Expo is using the current development callback; add that exact URI to Supabase Auth Redirect URLs.',
-      );
-    }
-  }
-
-  const { error } = await getSupabaseClient().auth.signInWithOtp({
-    email,
-    options: {
-      shouldCreateUser: mode === 'sign-up',
-      emailRedirectTo,
-    },
-  });
-  
-  if (error) throw error;
-}, []);
+  }, []);
 
 
 
@@ -162,7 +131,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [session],
   );
 
-  // Sign-in is passwordless (magic link), so the payment password is a separate
+  // Sign-in is passwordless (email OTP), so the payment password is a separate
   // credential the user creates once. A flag in user_metadata tells us it exists.
   const hasPaymentPassword = session?.user.user_metadata?.payment_password_set === true;
 
@@ -180,7 +149,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
         session,
         isLoading,
         initializationError,
-        requestMagicLink,
+        requestEmailOtp,
+        verifyEmailOtp,
         signOut,
         hasPaymentPassword,
         setPaymentPassword,

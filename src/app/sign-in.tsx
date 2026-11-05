@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,23 +18,55 @@ import { useAuth, type AuthMode } from '@/contexts/AuthContext';
 import { isSupabaseConfigured } from '@/utils/supabase';
 
 export default function SignInScreen() {
-  const { initializationError, requestMagicLink } = useAuth();
+  const { initializationError, requestEmailOtp, verifyEmailOtp } = useAuth();
   const [mode, setMode] = useState<AuthMode>('sign-in');
   const [email, setEmail] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [code, setCode] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [sentTo, setSentTo] = useState<string | null>(null);
-  const submissionInProgress = useRef(false);
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [resendSeconds, setResendSeconds] = useState(0);
+  const [resendFeedback, setResendFeedback] = useState(false);
+  const sendInProgress = useRef(false);
+  const verifyInProgress = useRef(false);
+
+  useEffect(() => {
+    if (!pendingEmail || resendSeconds === 0) return;
+    const timer = setTimeout(() => setResendSeconds((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [pendingEmail, resendSeconds]);
 
   const switchMode = (nextMode: AuthMode) => {
     setMode(nextMode);
     setFormError(null);
-    setSentTo(null);
+    setResendFeedback(false);
+  };
+
+  const sendCode = async (targetEmail: string, isResend = false) => {
+    if (sendInProgress.current || (isResend && resendSeconds > 0)) return;
+    setFormError(null);
+    if (isResend) setResendFeedback(false);
+    sendInProgress.current = true;
+    setIsSending(true);
+    try {
+      await requestEmailOtp(targetEmail, mode);
+      if (!isResend) {
+        setPendingEmail(targetEmail);
+        setCode('');
+      } else {
+        setResendFeedback(true);
+      }
+      setResendSeconds(60);
+    } catch (error: unknown) {
+      setFormError(getReadableAuthError(error, 'request', mode));
+    } finally {
+      sendInProgress.current = false;
+      setIsSending(false);
+    }
   };
 
   const handleSubmit = async () => {
-    if (submissionInProgress.current) return;
-    setFormError(null);
     const normalizedEmail = email.trim();
     if (!normalizedEmail) {
       setFormError('Enter your email address.');
@@ -44,18 +76,30 @@ export default function SignInScreen() {
       setFormError('Enter a valid email address.');
       return;
     }
+    await sendCode(normalizedEmail);
+  };
 
-    submissionInProgress.current = true;
-    setIsSubmitting(true);
+  const handleVerify = async () => {
+    if (!pendingEmail || code.length !== 6 || verifyInProgress.current) return;
+    setFormError(null);
+    verifyInProgress.current = true;
+    setIsVerifying(true);
     try {
-      await requestMagicLink(normalizedEmail, mode);
-      setSentTo(normalizedEmail);
+      await verifyEmailOtp(pendingEmail, code);
     } catch (error: unknown) {
-      setFormError(getReadableAuthError(error, mode));
+      setFormError(getReadableAuthError(error, 'verification', mode));
     } finally {
-      submissionInProgress.current = false;
-      setIsSubmitting(false);
+      verifyInProgress.current = false;
+      setIsVerifying(false);
     }
+  };
+
+  const handleBackToEmail = () => {
+    setPendingEmail(null);
+    setCode('');
+    setFormError(null);
+    setResendFeedback(false);
+    setResendSeconds(0);
   };
 
   const configurationMessage = !isSupabaseConfigured
@@ -80,33 +124,35 @@ export default function SignInScreen() {
 
           <View style={styles.card}>
             <Text style={styles.title}>
-              {sentTo
-                ? 'Check your email'
+              {pendingEmail
+                ? 'Verify your email'
                 : mode === 'sign-in'
                   ? 'Welcome back'
                   : 'Create your account'}
             </Text>
             <Text style={styles.subtitle}>
-              {sentTo
-                ? `A secure ${mode === 'sign-in' ? 'sign-in' : 'account confirmation'} link has been requested for ${sentTo}. Open it on this device to continue.`
+              {pendingEmail
+                ? mode === 'sign-in'
+                  ? `If an account exists for ${pendingEmail}, a six-digit code has been sent. Enter it below to continue.`
+                  : `We've sent a six-digit verification code to ${pendingEmail}. Enter it below to continue.`
                 : mode === 'sign-in'
-                  ? "Enter your email and we'll send you a secure sign-in link."
+                  ? "Enter your email and we'll send you a verification code."
                   : 'Get started managing your boarding house.'}
             </Text>
 
-            {!sentTo && (
+            {!pendingEmail ? (
               <>
                 <View style={styles.modeSwitch} accessibilityRole="tablist">
                   <ModeButton
                     label="Sign in"
                     selected={mode === 'sign-in'}
-                    disabled={isSubmitting}
+                    disabled={isSending}
                     onPress={() => switchMode('sign-in')}
                   />
                   <ModeButton
                     label="Sign up"
                     selected={mode === 'sign-up'}
-                    disabled={isSubmitting}
+                    disabled={isSending}
                     onPress={() => switchMode('sign-up')}
                   />
                 </View>
@@ -118,7 +164,7 @@ export default function SignInScreen() {
                     autoCapitalize="none"
                     autoComplete="email"
                     autoCorrect={false}
-                    editable={!isSubmitting}
+                    editable={!isSending}
                     keyboardType="email-address"
                     onChangeText={(value) => {
                       setEmail(value);
@@ -133,6 +179,28 @@ export default function SignInScreen() {
                   />
                 </View>
               </>
+            ) : (
+              <View style={styles.field}>
+                <Text style={styles.label}>Six-digit verification code</Text>
+                <TextInput
+                  accessibilityLabel="Six-digit verification code"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  onChangeText={(value) => {
+                    setCode(value.replace(/\D/g, '').slice(0, 6));
+                    setFormError(null);
+                  }}
+                  placeholder="000000"
+                  placeholderTextColor={DashboardColors.neutral}
+                  returnKeyType="done"
+                  onSubmitEditing={handleVerify}
+                  style={[styles.input, styles.codeInput]}
+                  textContentType="oneTimeCode"
+                  value={code}
+                />
+              </View>
             )}
 
             {configurationMessage && (
@@ -152,35 +220,80 @@ export default function SignInScreen() {
               </Text>
             )}
 
-            {sentTo ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setSentTo(null)}
-                style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Use a different email</Text>
-              </Pressable>
+            {pendingEmail ? (
+              <>
+                {resendFeedback && (
+                  <Text accessibilityLiveRegion="polite" style={styles.resendFeedback}>
+                    A new code has been requested.
+                  </Text>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isVerifying || isSending || code.length !== 6 || !isSupabaseConfigured}
+                  onPress={handleVerify}
+                  style={({ pressed }) => [
+                    styles.submitButton,
+                    pressed && styles.submitButtonPressed,
+                    (isVerifying ||
+                      isSending ||
+                      code.length !== 6 ||
+                      !isSupabaseConfigured) &&
+                      styles.submitButtonDisabled,
+                  ]}>
+                  {isVerifying ? (
+                    <ActivityIndicator color={DashboardColors.white} />
+                  ) : (
+                    <Text style={styles.submitText}>Verify code</Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSending || resendSeconds > 0 || !isSupabaseConfigured}
+                  onPress={() => void sendCode(pendingEmail, true)}
+                  style={styles.linkButton}>
+                  <Text
+                    style={[
+                      styles.linkButtonText,
+                      (isSending || resendSeconds > 0 || !isSupabaseConfigured) &&
+                        styles.linkButtonDisabled,
+                    ]}>
+                    {isSending
+                      ? 'Sending code...'
+                      : resendSeconds > 0
+                        ? `Resend code in 0:${String(resendSeconds).padStart(2, '0')}`
+                        : 'Resend code'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSending || isVerifying}
+                  onPress={handleBackToEmail}
+                  style={styles.secondaryButton}>
+                  <Text style={styles.secondaryButtonText}>Back to email</Text>
+                </Pressable>
+              </>
             ) : (
               <Pressable
                 accessibilityRole="button"
-                disabled={isSubmitting || !isSupabaseConfigured}
+                disabled={isSending || !isSupabaseConfigured}
                 onPress={handleSubmit}
                 style={({ pressed }) => [
                   styles.submitButton,
                   pressed && styles.submitButtonPressed,
-                  (isSubmitting || !isSupabaseConfigured) && styles.submitButtonDisabled,
+                  (isSending || !isSupabaseConfigured) && styles.submitButtonDisabled,
                 ]}>
-                {isSubmitting ? (
+                {isSending ? (
                   <ActivityIndicator color={DashboardColors.white} />
                 ) : (
                   <Text style={styles.submitText}>
-                    {mode === 'sign-in' ? 'Send magic link' : 'Create account'}
+                    {mode === 'sign-in' ? 'Send verification code' : 'Create account'}
                   </Text>
                 )}
               </Pressable>
             )}
 
             <Text style={styles.securityNote}>
-              Sign in securely with a one-time email link. No password needed.
+              Sign in securely with a one-time email code. No password needed.
             </Text>
           </View>
 
@@ -214,28 +327,39 @@ function ModeButton({
   );
 }
 
-function getReadableAuthError(error: unknown, mode: AuthMode): string {
+function getReadableAuthError(
+  error: unknown,
+  action: 'request' | 'verification',
+  mode: AuthMode,
+): string {
   const message = error instanceof Error ? error.message : '';
   const normalized = message.toLowerCase();
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      ? error.code.toLowerCase()
+      : '';
 
-  if (normalized.includes('redirect') || normalized.includes('url')) {
-    return message || 'The sign-in redirect is not configured. Check your app redirect settings.';
-  }
-  if (normalized.includes('rate limit') || normalized.includes('too many')) {
-    return 'Too many email requests. Wait a little while, then try again.';
+  if (
+    code.includes('rate_limit') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('too many') ||
+    normalized.includes('security purposes')
+  ) {
+    return 'Too many code requests. Wait a little while before requesting another code.';
   }
   if (normalized.includes('fetch') || normalized.includes('network')) {
     return 'Unable to reach the sign-in service. Check your internet connection and try again.';
   }
-  if (normalized.includes('expired') || normalized.includes('invalid')) {
-    return 'This email link is invalid or expired. Request a new link and try again.';
+  if (action === 'verification' && (normalized.includes('expired') || normalized.includes('invalid'))) {
+    return 'That code is incorrect or expired. Check it or request a new one.';
   }
   if (normalized.includes('already registered') || normalized.includes('already exists')) {
     return mode === 'sign-up'
       ? 'An account may already exist for this email. Try the Sign in tab.'
-      : 'Unable to send a sign-in link for this email. Check the address and try again.';
+      : 'Unable to send a code for this email. Check the address and try again.';
   }
-  return message || 'We could not request an email link. Please try again.';
+  if (action === 'verification') return 'We could not verify that code. Please try again.';
+  return 'We could not send a verification code. Please try again.';
 }
 
 const styles = StyleSheet.create({
@@ -347,6 +471,12 @@ const styles = StyleSheet.create({
     color: DashboardColors.text,
     fontSize: 15,
   },
+  codeInput: {
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: 10,
+    textAlign: 'center',
+  },
   notice: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -400,6 +530,25 @@ const styles = StyleSheet.create({
     color: DashboardColors.primary,
     fontSize: 14,
     fontWeight: '700',
+  },
+  linkButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkButtonText: {
+    color: DashboardColors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  linkButtonDisabled: {
+    color: DashboardColors.neutral,
+  },
+  resendFeedback: {
+    color: DashboardColors.dark,
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 10,
   },
   securityNote: {
     color: DashboardColors.neutral,

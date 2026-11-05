@@ -25,7 +25,7 @@ In the output, you'll find options to open the app in a
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-## Supabase passwordless authentication
+## Supabase email OTP authentication
 
 1. Create a Supabase project and copy its Project URL and publishable key from the project API settings.
 2. Copy `.env.example` to `.env` and replace the example values:
@@ -33,33 +33,28 @@ You can start developing by editing the files inside the **app** directory. This
    ```env
    EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
    EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
-   EXPO_PUBLIC_AUTH_REDIRECT_URL=
    ```
 
-   Keep `EXPO_PUBLIC_AUTH_REDIRECT_URL` blank for development. The app creates the callback URI
-   for the current Expo environment and logs the exact URI to Metro. For a production web build,
-   set it to `https://<your-real-domain>/auth/callback` after the domain is finalized. Do not
-   copy the angle-bracket placeholder as a real value. The local `.env` file is ignored by Git.
-   Restart Expo after changing environment variables:
+   The local `.env` file is ignored by Git. Restart Expo after changing environment variables:
 
    ```bash
    npx expo start --clear
    ```
 
-3. In Supabase **Authentication → URL Configuration**, inspect the existing **Site URL** and do not replace it with an invented domain. When the production web domain is finalized, set Site URL to that real site origin and add its `/auth/callback` URL to **Redirect URLs**. Also add the exact callback URI printed by Metro to Redirect URLs. Expo Go's URI can change with the development session, so update it and request a fresh link when it changes. Native development and production builds use the app scheme `boardinghouse`, with callback `boardinghouse://auth/callback`. For production web, add the real deployed callback URL set in `EXPO_PUBLIC_AUTH_REDIRECT_URL`. The web URL remains a deployment TODO.
-4. In Supabase **Authentication → Email Templates → Magic Link**, configure a clickable link compatible with the app's PKCE client. Use the redirect passed by the app and the token hash:
+3. In Supabase **Authentication → Email Templates**, configure numerical codes rather than confirmation links. In the **Magic Link** template, replace the confirmation link with a displayed code, for example:
 
    ```html
-   <p><a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=email">Sign in to InKeeper</a></p>
+   <p>Your InKeeper verification code is: <strong>{{ .Token }}</strong></p>
    ```
 
-   Keep the template's `{{ .TokenHash }}` and `{{ .RedirectTo }}` variables intact. Do not use `{{ .Token }}` as the link destination; that is the manually entered OTP. The app callback verifies the token hash and establishes the session. Review the current template in the dashboard before replacing it, since this repository cannot inspect or change hosted Supabase settings.
-5. In **Authentication → Providers → Email**, confirm email sign-in is enabled. Review the project's email confirmation setting for new users and confirm it matches the intended registration policy. The app calls `signInWithOtp` with account creation disabled for Sign in and enabled for Sign up. Supabase may avoid revealing whether an email already has an account; users can switch modes if the link behavior does not match their intent.
-6. To test, use Sign up with an unused email, open the clickable email link on the same device, and confirm the callback reaches the dashboard only after a session is established. Then sign out and repeat with Sign in. Invalid or expired links show a recovery message rather than a blank page.
+   If sign-up confirmation is enabled, make the same change to the **Confirm signup** template. Do not include an OTP in a URL or log it. The app verifies the submitted code with Supabase; it does not use a redirect callback to sign in.
+
+4. In **Authentication → Sign In / Providers → Email**, confirm email authentication is enabled and set **Email OTP Length** to `6`. This is a hosted-project setting; `supabase/config.toml` also sets `auth.email.otp_length = 6` for local Supabase development, but changing that file does not update the hosted project. Review the **Email OTP expiration** setting as well. Supabase's default resend limit is one request per minute; the app applies a matching 60-second resend cooldown. Sign In requests do not create users; Sign Up requests allow Supabase to create an unconfirmed user. Supabase uses the `email` verification type for both flows.
+5. Test Sign Up with an unused email, enter the received code in the app, and confirm the app opens its authenticated screen. Sign out and repeat with an existing account in Sign In mode. Incorrect and expired codes should show an error without clearing the entered code.
 
 Only use the Supabase publishable key in the app. Never put a secret or service-role key in an `EXPO_PUBLIC_` variable or in client code.
 
-Passwordless email authentication is implemented in the app, but it is not confirmed operational until the Supabase dashboard template and redirect allow-list are configured and the complete flow is tested. Boarding houses, rooms, tenants, tenancies, and monthly bills are stored in Supabase.
+Email OTP authentication is implemented in the app, but it is not confirmed operational until the Supabase email templates are configured to send numerical codes and both flows are tested. Boarding houses, rooms, tenants, tenancies, and monthly bills are stored in Supabase.
 
 The migrations in `supabase/migrations/` add tenancy-specific charge overrides and the private `tenant-documents` bucket. Link the Supabase CLI to the intended project and apply pending migrations in order before registering tenants. The bucket accepts JPEG, PNG, and WebP files up to 5 MB. Its Storage policies validate room ownership through `rooms` and `boarding_house`, and read access requires a matching document path in the owner's tenant, tenancy, or archive record. A non-exposed `private` helper checks references across all owners before deletion because normal RLS queries cannot see other owners' rows. The previous private `Tenant_documents` bucket remains available for referenced legacy and archived documents; only unreferenced objects owned by the signed-in user can be removed.
 
