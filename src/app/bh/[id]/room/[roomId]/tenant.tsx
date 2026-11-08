@@ -43,6 +43,19 @@ function toDisplayDate(date: Date): string {
   });
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function RegisterTenantScreen() {
   const params = useLocalSearchParams<{ id: string; roomId: string }>();
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
@@ -91,37 +104,20 @@ export default function RegisterTenantScreen() {
 
       try {
         const client = getSupabaseClient();
-        const [
-          { data: ownerRows, error: ownerError },
-          { data: roomRows, error: roomError },
-        ] = await Promise.all([
-          client
-            .from('owner_default_charges')
-            .select('item_type, unit_price')
-            .eq('owner_id', ownerId),
-          client
-            .from('room_default_charges')
-            .select('item_type, unit_price')
-            .eq('room_id', room.id),
-        ]);
+        const { data: ownerRows, error: ownerError } = await client
+          .from('owner_default_charges')
+          .select('item_type, unit_price')
+          .eq('owner_id', ownerId);
         if (ownerError) throw ownerError;
-        if (roomError) throw roomError;
 
         const rates: Partial<Record<ChargeType, number>> = {};
         for (const row of ownerRows ?? []) {
           if (isChargeType(row.item_type)) rates[row.item_type] = Number(row.unit_price);
         }
-        for (const row of roomRows ?? []) {
-          if (isChargeType(row.item_type) && row.item_type !== 'electricity') {
-            rates[row.item_type] = Number(row.unit_price);
-          }
-        }
         if (isCurrent) setDefaultChargeRates(rates);
       } catch (error: unknown) {
         if (isCurrent) {
-          setDefaultsError(
-            error instanceof Error ? error.message : 'Could not load the standard charge rates.',
-          );
+          setDefaultsError(getErrorMessage(error, 'Could not load the standard charge rates.'));
         }
       } finally {
         if (isCurrent) setIsLoadingDefaults(false);

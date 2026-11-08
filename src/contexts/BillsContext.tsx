@@ -1,4 +1,12 @@
-import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { isOccupied, useRooms, type Room } from '@/contexts/RoomsContext';
@@ -135,6 +143,7 @@ type BillsContextValue = {
   loadError: string | null;
   reload: () => void;
   getBill: (roomId: string, period: string) => BillRecord;
+  getLatestBillDueDate: (roomId: string) => string | null;
   setStatus: (
     roomId: string,
     period: string,
@@ -163,6 +172,7 @@ export function BillsProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const reload = useCallback(() => setLoadAttempt((attempt) => attempt + 1), []);
 
   useEffect(() => {
     let isCurrent = true;
@@ -220,10 +230,15 @@ export function BillsProvider({ children }: { children: ReactNode }) {
       records,
       isLoading,
       loadError,
-      reload: () => setLoadAttempt((attempt) => attempt + 1),
+      reload,
       getBill: (roomId, period) =>
         records[recordKey(roomId, period)] ??
         makeDefaultBill(rooms.find((room) => room.id === roomId), period),
+      getLatestBillDueDate: (roomId) =>
+        Object.entries(records)
+          .filter(([key, record]) => key.startsWith(`${roomId}|`) && record.billId !== null)
+          .map(([, record]) => record)
+          .sort((a, b) => b.period.localeCompare(a.period))[0]?.dueDate ?? null,
       setStatus: async (roomId, period, status) => {
         const record = records[recordKey(roomId, period)];
         if (!record?.billId) throw new Error('This monthly bill has not been generated yet.');
@@ -253,7 +268,7 @@ export function BillsProvider({ children }: { children: ReactNode }) {
           }))
           .sort((a, b) => b.period.localeCompare(a.period)),
     }),
-    [isLoading, loadError, records, rooms],
+    [isLoading, loadError, records, reload, rooms],
   );
 
   return <BillsContext.Provider value={value}>{children}</BillsContext.Provider>;

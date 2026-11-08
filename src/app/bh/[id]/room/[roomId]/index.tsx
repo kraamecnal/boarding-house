@@ -47,6 +47,7 @@ export default function RoomDetailScreen() {
     isLoading: isLoadingBills,
     loadError: billsError,
     reload: reloadBills,
+    getLatestBillDueDate,
   } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
 
@@ -152,11 +153,12 @@ export default function RoomDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       let isCurrent = true;
+      reloadBills();
       void refreshMeterReadings(() => isCurrent);
       return () => {
         isCurrent = false;
       };
-    }, [refreshMeterReadings]),
+    }, [refreshMeterReadings, reloadBills]),
   );
 
   if (!room) {
@@ -183,6 +185,7 @@ export default function RoomDetailScreen() {
 
   const occupied = isOccupied(room);
   const tenant = occupied ? room.tenant : null;
+  const tenantDueDate = tenant ? getLatestBillDueDate(room.id) : null;
   const paidBills = occupied ? getPaidBills(room.id) : [];
   const latestMeterReading = meterReadings[0];
   // Only tenants who have already moved in can be archived.
@@ -256,7 +259,19 @@ export default function RoomDetailScreen() {
                   <InfoRow label="Email" value={tenant.email} />
                   <InfoRow label="Contact" value={tenant.contactNumber} />
                   <InfoRow label="Start date" value={formatShortDate(tenant.startDate)} />
-                  <InfoRow label="Due date" value={formatShortDate(tenant.dueDate)} />
+                  <View style={styles.infoDivider} />
+                  <InfoRow
+                    label="Due date"
+                    value={
+                      isLoadingBills
+                        ? 'Loading…'
+                        : tenantDueDate
+                          ? formatShortDate(tenantDueDate)
+                          : billsError
+                            ? 'Unavailable'
+                            : 'Not available'
+                    }
+                  />
                 </>
               )}
             </View>
@@ -834,6 +849,11 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  infoDivider: {
+    height: 1,
+    marginVertical: 2,
+    backgroundColor: '#D1D5DB',
   },
   infoLabel: {
     width: 100,

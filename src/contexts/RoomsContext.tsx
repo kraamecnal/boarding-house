@@ -23,7 +23,6 @@ export type Tenant = {
   email: string;
   contactNumber: string;
   startDate: string;
-  dueDate: string;
   idImageUri: string;
   contractImageUri: string;
   idImagePath: string;
@@ -340,7 +339,6 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
                 email: tenantRow.email_address ?? '',
                 contactNumber: tenantRow.contact_number ?? '',
                 startDate: tenancy.move_in_date,
-                dueDate: addOneMonth(tenancy.move_in_date),
                 idImageUri: await signedDocumentUrl(tenantRow.id_photo_url),
                 contractImageUri: await signedDocumentUrl(tenancy.agreement_photo_url),
                 idImagePath: tenantRow.id_photo_url ?? '',
@@ -486,7 +484,6 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
             email: input.email.trim(),
             contactNumber: input.contactNumber.trim(),
             startDate: input.startDate,
-            dueDate: addOneMonth(input.startDate),
             idImageUri: input.idImage.uri,
             contractImageUri: input.contractImage.uri,
             idImagePath: idPhotoPath,

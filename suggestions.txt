@@ -1,6 +1,6 @@
 to do:
 1. ask the client what is the process of tenant moving out
-
+2. implement archive function
 
 Push Notifications — Remaining Tasks
 The basic Expo setup is already in place. Please finish the following:
