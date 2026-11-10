@@ -62,6 +62,14 @@ export default function ProfileScreen() {
         </View>
         <Ionicons color={DashboardColors.neutral} name="chevron-forward" size={20} />
       </Pressable>
+      {hasPaymentPassword && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/auth/recover-payment-password')}
+          style={styles.forgotPassword}>
+          <Text style={styles.forgotPasswordLabel}>Forgot password?</Text>
+        </Pressable>
+      )}
       {passwordSaved && (
         <Text accessibilityLiveRegion="polite" style={styles.success}>
           Payment password saved.
@@ -162,6 +170,15 @@ const styles = StyleSheet.create({
   rowDescription: {
     color: DashboardColors.neutral,
     fontSize: 12,
+  },
+  forgotPassword: {
+    alignSelf: 'stretch',
+    alignItems: 'flex-end',
+    marginTop: -12,
+  },
+  forgotPasswordLabel: {
+    color: DashboardColors.primary,
+    fontSize: 13,
   },
   error: {
     color: '#B42318',

@@ -131,8 +131,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [session],
   );
 
-  // Sign-in is passwordless (email OTP), so the payment password is a separate
-  // credential the user creates once. A flag in user_metadata tells us it exists.
+  // Email OTP is the app's sign-in flow, but this password is stored as the
+  // Supabase Auth account password and also confirms bill payments.
   const hasPaymentPassword = session?.user.user_metadata?.payment_password_set === true;
 
   const setPaymentPassword = useCallback(async (password: string) => {

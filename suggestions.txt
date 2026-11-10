@@ -10,3 +10,10 @@ Add app code to ask the user for permission, get their push token, and save it s
 Set up a backend service to send notifications when we decide they’re needed.
 Build the app and test that a notification arrives on a physical Android phone.
 Done when: the app can request permission, register a device, send a test notification, and receive it successfully.
+
+
+Important security warning
+The scheduled-job definition contains a hard-coded service-role JWT in its 
+authorization header. Treat it as exposed: rotate the project’s service-role 
+secret/key, then update that job to retrieve its credential from a secret store 
+rather than embedding it in the SQL command. Don’t reuse or share the exposed token.

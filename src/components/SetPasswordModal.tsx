@@ -22,10 +22,7 @@ type Props = {
   onSaved: () => void;
 };
 
-/**
- * Creates or changes the payment password. This password is only used to
- * confirm the PAID button on a bill; it is not a sign-in password.
- */
+/** Creates or changes the Supabase Auth password used to confirm bill payments. */
 export default function SetPasswordModal({ visible, onClose, onSaved }: Props) {
   const { hasPaymentPassword, setPaymentPassword, verifyPassword } = useAuth();
   const [current, setCurrent] = useState('');
@@ -105,8 +102,7 @@ export default function SetPasswordModal({ visible, onClose, onSaved }: Props) {
             {hasPaymentPassword ? 'Change payment password' : 'Set payment password'}
           </Text>
           <Text style={styles.subtitle}>
-            This password is only used to confirm the PAID button on a bill. It is not used to sign
-            in.
+            This password confirms bill payments and is also your Supabase account password.
           </Text>
 
           {hasPaymentPassword && (
