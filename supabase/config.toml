@@ -96,7 +96,7 @@ enabled = true
 verify_jwt = false
 
 [functions.send-bill-reminders]
-verify_jwt = true
+verify_jwt = false
 
 [studio]
 enabled = true

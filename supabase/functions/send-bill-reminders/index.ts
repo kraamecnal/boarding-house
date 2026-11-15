@@ -5,9 +5,9 @@ import {
 import {
   addDays,
   escapeHtml,
-  jwtRole,
   manilaDate,
   reminderTypeForDueDate,
+  secretMatches,
   type ReminderType,
 } from './reminder-logic.ts'
 
@@ -365,20 +365,31 @@ Deno.serve(async (request: Request) => {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
-  if (jwtRole(request.headers.get('authorization')) !== 'service_role') {
+  const expectedCronToken = Deno.env.get('BILL_REMINDERS_CRON_TOKEN')
+  if (!expectedCronToken) {
+    console.error('Bill reminder cron authentication is missing required server configuration.')
+    return jsonResponse({ error: 'Bill reminder delivery is not configured.' }, 500)
+  }
+
+  if (
+    !secretMatches(
+      request.headers.get('x-bill-reminders-cron-token'),
+      expectedCronToken,
+    )
+  ) {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const serverApiSecret = Deno.env.get('SERVER_API_SECRET')
   const brevoKey = Deno.env.get('BREVO_API_KEY')
   const senderEmail = Deno.env.get('BREVO_SENDER_EMAIL')
-  if (!supabaseUrl || !serviceRoleKey || !brevoKey || !senderEmail) {
+  if (!supabaseUrl || !serverApiSecret || !brevoKey || !senderEmail) {
     console.error('Bill reminder delivery is missing required server configuration.')
     return jsonResponse({ error: 'Bill reminder delivery is not configured.' }, 500)
   }
 
-  const supabase = createClient<Database>(supabaseUrl, serviceRoleKey, {
+  const supabase = createClient<Database>(supabaseUrl, serverApiSecret, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
   const today = manilaDate(new Date())

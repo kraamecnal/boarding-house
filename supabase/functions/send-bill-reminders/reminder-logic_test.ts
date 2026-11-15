@@ -1,9 +1,9 @@
 import {
   addDays,
   escapeHtml,
-  jwtRole,
   manilaDate,
   reminderTypeForDueDate,
+  secretMatches,
 } from './reminder-logic.ts'
 
 Deno.test('Manila date conversion handles UTC date boundaries', () => {
@@ -31,17 +31,17 @@ Deno.test('HTML content escapes tenant-controlled values', () => {
   }
 })
 
-Deno.test('only a verified service-role bearer claim is accepted by the handler', () => {
-  const payload = btoa(JSON.stringify({ role: 'service_role' }))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-  const serviceRoleToken = `header.${payload}.signature`
-  const userToken = `header.${btoa(JSON.stringify({ role: 'authenticated' })).replace(/=/g, '')}.signature`
-  if (jwtRole(`Bearer ${serviceRoleToken}`) !== 'service_role') {
-    throw new Error('Expected the scheduled service-role token to be recognized.')
+Deno.test('cron authentication requires the exact configured secret', () => {
+  const expected = 'a'.repeat(64)
+  if (!secretMatches(expected, expected)) {
+    throw new Error('Expected the configured cron secret to be accepted.')
   }
-  if (jwtRole(`Bearer ${userToken}`) === 'service_role' || jwtRole(null) !== null) {
-    throw new Error('User tokens and missing tokens must be rejected.')
+  if (
+    secretMatches(`${expected}b`, expected) ||
+    secretMatches(null, expected) ||
+    secretMatches(expected, null) ||
+    secretMatches('', '')
+  ) {
+    throw new Error('A missing or mismatched cron secret must be rejected.')
   }
 })

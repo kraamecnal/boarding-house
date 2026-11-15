@@ -39,19 +39,18 @@ export function escapeHtml(value: string): string {
   })
 }
 
-export function jwtRole(authorization: string | null): string | null {
-  const match = authorization?.match(/^Bearer\s+([A-Za-z0-9._-]+)$/i)
-  if (!match) return null
+export function secretMatches(provided: string | null, expected: string | null): boolean {
+  if (provided === null || expected === null || expected.length === 0) return false
 
-  try {
-    const payload = match[1].split('.')[1]
-    if (!payload) return null
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const decoded = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))
-    const claims: unknown = JSON.parse(decoded)
-    if (typeof claims !== 'object' || claims === null || !('role' in claims)) return null
-    return typeof claims.role === 'string' ? claims.role : null
-  } catch {
-    return null
+  const encoder = new TextEncoder()
+  const providedBytes = encoder.encode(provided)
+  const expectedBytes = encoder.encode(expected)
+  const maxLength = Math.max(providedBytes.length, expectedBytes.length)
+  let difference = providedBytes.length ^ expectedBytes.length
+
+  for (let index = 0; index < maxLength; index += 1) {
+    difference |= (providedBytes[index] ?? 0) ^ (expectedBytes[index] ?? 0)
   }
+
+  return difference === 0
 }

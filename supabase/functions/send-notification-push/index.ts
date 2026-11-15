@@ -46,13 +46,13 @@ Deno.serve(async (request: Request) => {
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  if (!supabaseUrl || !serviceRoleKey) {
+  const serverApiSecret = Deno.env.get('SERVER_API_SECRET')
+  if (!supabaseUrl || !serverApiSecret) {
     console.error('Push delivery is missing required Supabase environment variables.')
     return jsonResponse({ error: 'Push delivery is not configured.' }, 500)
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  const supabase = createClient(supabaseUrl, serverApiSecret, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
   const { data: notification, error: notificationError } = await supabase
