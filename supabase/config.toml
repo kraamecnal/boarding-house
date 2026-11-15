@@ -95,6 +95,9 @@ enabled = true
 [functions.send-notification-push]
 verify_jwt = false
 
+[functions.send-bill-reminders]
+verify_jwt = true
+
 [studio]
 enabled = true
 # Port to use for Supabase Studio.

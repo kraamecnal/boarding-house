@@ -92,7 +92,21 @@ select vault.create_secret('https://<project-ref>.supabase.co', 'notifications_s
 select vault.create_secret('<random-secret>', 'notifications_webhook_secret');
 ```
 
-The database queues push requests asynchronously through `pg_net`, so a push-service outage does not roll back a bill, tenancy, or notification. The existing `send-bill-reminders` email function and its schedule are separate and unchanged.
+The database queues push requests asynchronously through `pg_net`, so a push-service outage does not roll back a bill, tenancy, or notification.
+
+### Tenant email reminders
+
+The existing `send-bill-reminders-daily` cron job invokes the server-only `send-bill-reminders` Edge Function. Apply the `bill_reminder_delivery_tracking` migration before deploying the function. The migration adds delivery/attempt state to the existing `bill_reminders` table and updates that same cron job to run hourly; the function only processes unpaid bills due today or in two days (Manila time), so hourly runs provide same-day retry opportunities without creating another schedule. A unique bill/type key and an atomic claim prevent concurrent duplicate sends. Successful Brevo acceptance is recorded as `sent`; rejected requests remain failed, and requests whose outcome is ambiguous are marked `uncertain` and are not automatically resent.
+
+Push the migration, then set the following Edge Function secrets in the target Supabase project. Do not put their values in app code or commit them:
+
+```sh
+npx supabase db push --project-ref <project-ref>
+npx supabase secrets set BREVO_API_KEY=<brevo-api-key> BREVO_SENDER_EMAIL=<verified-sender-email> --project-ref <project-ref>
+npx supabase functions deploy send-bill-reminders --project-ref <project-ref>
+```
+
+Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the server runtime. The function requires a verified service-role JWT, accepts no bill ID from callers, and must remain configured with `verify_jwt = true`. The cron job uses its existing server-side service-role authorization. For local checks, run `deno test supabase/functions/send-bill-reminders/reminder-logic_test.ts`; do not test delivery by calling the live function with real tenant bills. Use a developer-approved controlled recipient for any end-to-end email test.
 
 ### Notification checks
 
