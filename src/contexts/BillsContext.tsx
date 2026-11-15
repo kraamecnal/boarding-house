@@ -11,7 +11,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { isOccupied, useRooms, type Room } from '@/contexts/RoomsContext';
 import { DUE_DAY_OF_NEXT_MONTH } from '@/data/billingConfig';
-import { computeTotals, dueDateFor, todayIso } from '@/utils/billing';
+import { computeTotals, dueDateFor } from '@/utils/billing';
 import { getSupabaseClient } from '@/utils/supabase';
 
 export type BillStatus = 'unpaid' | 'paid';
@@ -108,7 +108,7 @@ function mapBill(row: DbBill): BillRecord {
   return {
     billId: row.bill_id,
     period: row.period_start.slice(0, 7),
-    issuedDate: (row.billed_at ?? row.created_at).slice(0, 10),
+    issuedDate: row.billed_at ?? 'Not yet issued',
     dueDate: row.due_date,
     electricity,
     status: paid ? 'paid' : 'unpaid',
@@ -125,7 +125,7 @@ function makeDefaultBill(room: Room | undefined, period: string): BillRecord {
   return {
     billId: null,
     period,
-    issuedDate: todayIso(),
+    issuedDate: 'Not yet issued',
     dueDate: dueDateFor(period, DUE_DAY_OF_NEXT_MONTH),
     electricity: '',
     status: 'unpaid',

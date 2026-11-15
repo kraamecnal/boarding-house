@@ -33,6 +33,10 @@ export default function BillStatement({
   onChangeStatus,
 }: Props) {
   const totals = computeTotals(room.monthlyRate, record.electricity);
+  const issuedDateLabel =
+    record.issuedDate && record.issuedDate !== 'Not yet issued'
+      ? formatShortDate(record.issuedDate)
+      : 'Not yet issued';
   const meteredElectricity = record.items.some((item) => item.itemType === 'electricity');
   const manualElectricity = record.items.some(
     (item) => item.itemType === 'adjustment' && item.description === 'Electricity',
@@ -67,7 +71,7 @@ export default function BillStatement({
       <Rule />
       <View style={styles.block}>
         <Field label="Billing Period" value={periodLabel(record.period)} />
-        <Field label="Bill Date Issued" value={formatShortDate(record.issuedDate)} />
+        <Field label="Bill Date Issued" value={issuedDateLabel} />
         <Field label="Due Date" value={formatShortDate(record.dueDate)} />
       </View>
       <Rule />
@@ -223,6 +227,24 @@ export default function BillStatement({
                       )}
                   </>
                 )}
+                {!record.isFinalized &&
+                  record.status !== 'paid' &&
+                  meterContext?.saved &&
+                  meterContext.currentReading && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: isSavingMeterReading }}
+                      disabled={isSavingMeterReading}
+                      onPress={onSaveMeterReading}
+                      style={[
+                        styles.meterButton,
+                        isSavingMeterReading && styles.meterButtonDisabled,
+                      ]}>
+                      <Text style={styles.meterButtonLabel}>
+                        {isSavingMeterReading ? 'Issuing…' : 'Issue bill'}
+                      </Text>
+                    </Pressable>
+                  )}
               </>
             ) : !record.billId ? (
               <Text style={styles.electricityMessage}>No electricity charge.</Text>

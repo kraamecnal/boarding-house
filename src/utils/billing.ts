@@ -8,11 +8,6 @@ const MONTHS_LONG = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const MONTHS_SHORT = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec',
-];
-
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export function todayIso(): string {
@@ -56,8 +51,21 @@ export function periodLabel(period: string): string {
 }
 
 export function formatShortDate(iso: string): string {
-  const [year, month, day] = iso.split('-').map(Number);
-  return `${MONTHS_SHORT[month - 1]} ${day}, ${year}`;
+  if (!iso || iso === 'Not yet issued') return 'Not yet issued';
+
+  const timestamp = new Date(iso);
+  if (Number.isNaN(timestamp.getTime())) {
+    return iso;
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return formatter.format(timestamp);
 }
 
 export function dueDateFor(period: string, dueDay: number): string {
@@ -153,6 +161,8 @@ export function buildBillText({
   const heavy = '═'.repeat(WIDTH);
   const light = '-'.repeat(WIDTH);
 
+  const issuedValue = issuedDate && issuedDate !== 'Not yet issued' ? formatShortDate(issuedDate) : 'Not yet issued';
+
   return [
     heavy,
     center('MONTHLY BILLING STATEMENT'),
@@ -165,7 +175,7 @@ export function buildBillText({
     '',
     light,
     field('Billing Period:', periodLabel(period)),
-    field('Bill Date Issued:', formatShortDate(issuedDate)),
+    field('Bill Date Issued:', issuedValue),
     field('Due Date:', formatShortDate(dueDate)),
     light,
     '',

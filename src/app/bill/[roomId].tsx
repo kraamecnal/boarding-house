@@ -147,7 +147,11 @@ export default function TenantBillScreen() {
 
     setIsSavingMeterReading(true);
     try {
-      await saveBillMeterReading(record.billId, value, todayIso());
+      await saveBillMeterReading(
+        record.billId,
+        value,
+        meterContext?.currentReading?.readingAt ?? todayIso(),
+      );
       setMeterContextAttempt((attempt) => attempt + 1);
       reload();
     } catch (error: unknown) {
