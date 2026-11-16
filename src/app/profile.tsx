@@ -78,6 +78,17 @@ export default function ProfileScreen() {
 
       <Pressable
         accessibilityRole="button"
+        onPress={() => router.push('/setup?edit=1')}
+        style={styles.row}>
+        <View style={styles.rowCopy}>
+          <Text style={styles.rowTitle}>Fixed charges</Text>
+          <Text style={styles.rowDescription}>Water, Wi-Fi, trash and electricity rates</Text>
+        </View>
+        <Ionicons color={DashboardColors.neutral} name="chevron-forward" size={20} />
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
         onPress={() => router.push('/settings')}
         style={styles.row}>
         <View style={styles.rowCopy}>
