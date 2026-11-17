@@ -184,7 +184,7 @@ export default function RegisterTenantScreen() {
     if (hasStarted && openingReadingValue === null) {
       return Alert.alert(
         'Move-in reading required',
-        'Enter the meter value from the move-in date before registering a tenant who has already moved in.',
+        'If your tenant has already moved in, first enter the meter reading from the day they moved in. Then register the tenant.',
       );
     }
     if (!idImage) {
