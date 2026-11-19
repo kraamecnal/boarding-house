@@ -1,21 +1,28 @@
 import { DarkTheme, DefaultTheme, Redirect, Stack, ThemeProvider, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { ActivityIndicator, StyleSheet, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { BillsProvider } from '@/contexts/BillsContext';
 import { BoardingHousesProvider } from '@/contexts/BoardingHousesContext';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
+import { OwnerChargesProvider, useOwnerCharges } from '@/contexts/OwnerChargesContext';
 import { RoomsProvider } from '@/contexts/RoomsContext';
 
 SplashScreen.preventAutoHideAsync();
 
 function AppNavigator() {
-  const { isLoading, session } = useAuth();
+  const { isLoading, session, hasPaymentPassword, signOut } = useAuth();
+  const {
+    isLoading: isLoadingCharges,
+    loadError: chargesError,
+    hasAllCharges,
+    reload: reloadCharges,
+  } = useOwnerCharges();
   const pathname = usePathname();
 
-  if (isLoading) {
+  if (isLoading || (session && isLoadingCharges)) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#208AEF" />
@@ -25,6 +32,31 @@ function AppNavigator() {
 
   if (!session && pathname !== '/sign-in' && pathname !== '/auth/callback') {
     return <Redirect href="/sign-in" />;
+  }
+
+  // If the setup status can't be checked, don't let anyone through.
+  if (session && chargesError) {
+    return (
+      <View style={styles.loading}>
+        <Text style={styles.errorTitle}>We couldn’t check your account setup</Text>
+        <Text style={styles.errorMessage}>{chargesError}</Text>
+        <Pressable accessibilityRole="button" onPress={reloadCharges} style={styles.retryButton}>
+          <Text style={styles.retryLabel}>Try again</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => void signOut().catch(() => undefined)}
+          style={styles.signOutButton}>
+          <Text style={styles.signOutLabel}>Sign out</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Mandatory setup: fixed charges + payment password must exist before the app opens.
+  const isSetupComplete = hasAllCharges && hasPaymentPassword;
+  if (session && !isSetupComplete && pathname !== '/setup' && !pathname.startsWith('/auth/')) {
+    return <Redirect href="/setup" />;
   }
 
   if (session && pathname === '/sign-in') {
@@ -47,6 +79,7 @@ function AppNavigator() {
         <Stack.Screen name="auth/recover-payment-password" options={{ title: 'Forgot password?' }} />
         <Stack.Screen name="billing-charges" options={{ title: 'Billing charges' }} />
         <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+        <Stack.Screen name="setup" options={{ title: 'Fixed charges' }} />
         <Stack.Screen name="tenants" options={{ title: 'Tenants' }} />
         <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
         <Stack.Screen
@@ -83,15 +116,17 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
-        <NotificationsProvider>
-          <BoardingHousesProvider>
-            <RoomsProvider>
-              <BillsProvider>
-                <AppNavigator />
-              </BillsProvider>
-            </RoomsProvider>
-          </BoardingHousesProvider>
-        </NotificationsProvider>
+        <OwnerChargesProvider>
+          <NotificationsProvider>
+            <BoardingHousesProvider>
+              <RoomsProvider>
+                <BillsProvider>
+                  <AppNavigator />
+                </BillsProvider>
+              </RoomsProvider>
+            </BoardingHousesProvider>
+          </NotificationsProvider>
+        </OwnerChargesProvider>
       </AuthProvider>
     </ThemeProvider>
   );
@@ -102,6 +137,30 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 32,
     backgroundColor: '#F4F7FB',
   },
+  errorTitle: {
+    color: '#14243A',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  errorMessage: {
+    color: '#667085',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    minHeight: 46,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#208AEF',
+  },
+  retryLabel: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  signOutButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
+  signOutLabel: { color: '#667085', fontSize: 14, fontWeight: '600' },
 });
