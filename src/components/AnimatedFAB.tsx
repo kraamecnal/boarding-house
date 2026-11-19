@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Animated, Pressable, StyleSheet, Text } from 'react-native';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -7,12 +7,17 @@ type AnimatedFABProps = {
   onPress: () => void;
   label?: string;
   accessibilityLabel?: string;
+  backgroundColor?: string;
+  icon?: ReactNode;
 };
 
 export default function AnimatedFAB({
   onPress,
   label = '+',
-  accessibilityLabel = 'Register a new room'}: AnimatedFABProps) {
+  accessibilityLabel = 'Register a new room',
+  backgroundColor,
+  icon,
+}: AnimatedFABProps) {
   const scale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
@@ -36,11 +41,15 @@ export default function AnimatedFAB({
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       onPress={onPress}
-      style={[styles.fab, { transform: [{ scale }] }]}
+      style={[
+        styles.fab,
+        backgroundColor ? { backgroundColor } : undefined,
+        { transform: [{ scale }] },
+      ]}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <Text style={styles.icon}>{label}</Text>
+      {icon ?? <Text style={styles.icon}>{label}</Text>}
     </AnimatedPressable>
   );
 }

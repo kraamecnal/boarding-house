@@ -124,18 +124,33 @@ export function isOccupied(room: Room): room is OccupiedRoom {
   return room.status === 'occupied' && room.tenant !== null;
 }
 
+// add one month then minus 1 day
 export function addOneMonth(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
+
+  // Move to the next month
   const targetMonthIndex = month;
+
+  // Get the last valid day of the target month
   const daysInTargetMonth = new Date(year, targetMonthIndex + 1, 0).getDate();
+
+  // Prevent invalid dates (e.g. January 31 → February 28)
   const clampedDay = Math.min(day, daysInTargetMonth);
+
+  // Construct the date one month later
   const result = new Date(year, targetMonthIndex, clampedDay);
 
+  // Subtract one day
+  result.setDate(result.getDate() - 1);
+
+  // Format as YYYY-MM-DD
   const yyyy = result.getFullYear();
   const mm = String(result.getMonth() + 1).padStart(2, '0');
   const dd = String(result.getDate()).padStart(2, '0');
+
   return `${yyyy}-${mm}-${dd}`;
 }
+
 
 const RoomsContext = createContext<ContextValue | undefined>(undefined);
 

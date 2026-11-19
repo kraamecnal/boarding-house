@@ -20,6 +20,7 @@ type TenantRow = {
   key: string;
   name: string;
   roomName: string;
+  boardingHouseName: string;
   moveInDate: string | null;
   moveOutDate: string | null;
   boardingHouseId?: string;
@@ -90,7 +91,7 @@ export default function TenantsScreen() {
           let archivedQuery = client
             .from('tenant_archive')
             .select(
-              'archive_id, tenant_name, room_name, move_in_date, move_out_date',
+              'archive_id, tenant_name, room_name, boarding_house_name, move_in_date, move_out_date',
               { count: 'exact' },
             )
             .eq('owner_id', ownerId);
@@ -112,6 +113,7 @@ export default function TenantsScreen() {
             archiveId: row.archive_id,
             name: row.tenant_name,
             roomName: row.room_name ?? 'Room unavailable',
+            boardingHouseName: row.boarding_house_name ?? 'Boarding house unavailable',
             moveInDate: row.move_in_date,
             moveOutDate: row.move_out_date,
           }));
@@ -119,7 +121,7 @@ export default function TenantsScreen() {
           let tenancyQuery = client
             .from('tenancy')
             .select(
-              'tenancy_id, move_in_date, tenants(tenant_id,name), rooms(room_id,room_name,boarding_house_id)',
+              'tenancy_id, move_in_date, tenants(tenant_id,name), rooms(room_id,room_name,boarding_house_id,boarding_house(name))',
               { count: 'exact' },
             )
             .eq('owner_id', ownerId)
@@ -140,10 +142,12 @@ export default function TenantsScreen() {
           rows = (data ?? []).map((row) => {
             const tenant = getRelatedRecord(row.tenants);
             const room = getRelatedRecord(row.rooms);
+            const boardingHouse = getRelatedRecord(room?.boarding_house);
             return {
               key: row.tenancy_id,
               name: tenant?.name ?? 'Tenant unavailable',
               roomName: room?.room_name ?? 'Room unavailable',
+              boardingHouseName: boardingHouse?.name ?? 'Boarding house unavailable',
               moveInDate: row.move_in_date,
               moveOutDate: null,
               boardingHouseId: room?.boarding_house_id,
@@ -254,6 +258,7 @@ export default function TenantsScreen() {
                 )}
               </View>
               <Text style={styles.roomName}>{tenant.roomName}</Text>
+              <Text style={styles.dateText}>{tenant.boardingHouseName}</Text>
               <Text style={styles.dateText}>
                 {status === 'scheduled' ? 'Move-in: ' : 'Moved in: '}{formatDate(tenant.moveInDate)}
               </Text>
