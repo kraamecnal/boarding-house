@@ -30,6 +30,12 @@ export type SavedBillMeterReading = {
   amount: number;
 };
 
+export type BillElectricityRollForward = {
+  targetBillId: string;
+  targetPeriodStart: string;
+  status: 'pending' | 'completed';
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -123,4 +129,81 @@ export async function saveBillMeterReading(
     rate: result.rate,
     amount: result.amount,
   };
+}
+
+export async function carryForwardBillElectricity(
+  sourceBillId: string,
+): Promise<BillElectricityRollForward> {
+  const { data, error } = await getSupabaseClient().rpc('carry_forward_bill_electricity', {
+    p_source_bill_id: sourceBillId,
+  });
+  if (error) throw error;
+
+  const result: unknown = data;
+  if (
+    !isRecord(result) ||
+    typeof result.targetBillId !== 'string' ||
+    typeof result.targetPeriodStart !== 'string' ||
+    (result.status !== 'pending' && result.status !== 'completed')
+  ) {
+    throw new Error('The carry-forward response has an unexpected format.');
+  }
+  return {
+    targetBillId: result.targetBillId,
+    targetPeriodStart: result.targetPeriodStart,
+    status: result.status,
+  };
+}
+
+export async function cancelBillElectricityRollForward(sourceBillId: string): Promise<void> {
+  const { error } = await getSupabaseClient().rpc('cancel_bill_electricity_roll_forward', {
+    p_source_bill_id: sourceBillId,
+  });
+  if (error) throw error;
+}
+
+export function billMeterErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+
+  const message = error.message.toLowerCase();
+  if (
+    message.includes('reading date must be later than the previous reading') ||
+    message.includes('current reading must be later')
+  ) {
+    return 'A later meter reading is already recorded, so this historical reading cannot be added safely. No readings were changed. Use Carry Forward instead.';
+  }
+  if (message.includes('resolve earlier electricity readings')) {
+    return 'Resolve the earlier bill first: enter a real reading from that period, or explicitly carry its usage forward.';
+  }
+  if (message.includes('there is no later generated bill')) {
+    return 'A later bill has not been generated yet, so this usage cannot be carried forward.';
+  }
+  if (message.includes('later bill already has a manual electricity charge')) {
+    return 'The later bill already has a manual electricity charge, so usage cannot be carried forward to it.';
+  }
+  if (message.includes('a reading already exists in this bill period')) {
+    return 'A meter reading already exists in this period. Use the late-reading option instead of carrying it forward.';
+  }
+  if (message.includes('already attached to another bill')) {
+    return 'This meter reading is already included on another bill, so it cannot be added again.';
+  }
+  if (message.includes('a different meter reading is already saved for this date')) {
+    return 'A different meter value is already recorded on this date. No readings were changed.';
+  }
+  if (message.includes('does not contain the full missed-period')) {
+    return 'The later bill’s reading interval does not cover this entire period, so it cannot be carried forward safely.';
+  }
+  if (message.includes('reading interval does not cover')) {
+    return 'The later bill’s reading interval does not cover this entire period, so it cannot be carried forward safely.';
+  }
+  if (message.includes('opening reading before this bill period')) {
+    return 'An opening meter reading before this bill period is required before usage can be carried forward.';
+  }
+  if (message.includes('cannot be cancelled safely')) {
+    return 'A later meter reading already exists. The carry-forward cannot be cancelled without changing the reading sequence.';
+  }
+  if (message.includes('issued or paid bill cannot be changed')) {
+    return 'An issued or paid bill cannot be changed by this action. A separate adjustment is needed.';
+  }
+  return error.message;
 }

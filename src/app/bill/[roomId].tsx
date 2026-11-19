@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,11 +28,18 @@ import {
   todayIso,
 } from '@/utils/billing';
 import {
+  billMeterErrorMessage,
+  cancelBillElectricityRollForward,
+  carryForwardBillElectricity,
   getBillMeterContext,
   saveBillMeterReading,
   type BillMeterContext,
 } from '@/utils/meterBilling';
-import { parseMeterReadingInput, sanitizeMeterReadingInput } from '@/utils/meterReadings';
+import {
+  isValidIsoDate,
+  parseMeterReadingInput,
+  sanitizeMeterReadingInput,
+} from '@/utils/meterReadings';
 
 export default function TenantBillScreen() {
   const params = useLocalSearchParams<{ roomId: string; period?: string }>();
@@ -66,6 +73,10 @@ export default function TenantBillScreen() {
   const [meterReadingValue, setMeterReadingValue] = useState('');
   const [isSavingMeterReading, setIsSavingMeterReading] = useState(false);
   const [meterContextAttempt, setMeterContextAttempt] = useState(0);
+  const [isLateReadingMode, setIsLateReadingMode] = useState(false);
+  const [lateReadingDate, setLateReadingDate] = useState<string | null>(null);
+  const [isCarryingForward, setIsCarryingForward] = useState(false);
+  const [isCancellingCarryForward, setIsCancellingCarryForward] = useState(false);
 
   useEffect(() => {
     let isCurrent = true;
@@ -78,9 +89,25 @@ export default function TenantBillScreen() {
       };
     }
 
+    const readingAt = isLateReadingMode
+      ? lateReadingDate && isValidIsoDate(lateReadingDate)
+        ? lateReadingDate
+        : null
+      : todayIso();
+    if (!readingAt) {
+      setMeterContext(null);
+      setMeterContextError(null);
+      setIsLoadingMeterContext(false);
+      setMeterReadingValue('');
+      return () => {
+        isCurrent = false;
+      };
+    }
+
     setIsLoadingMeterContext(true);
     setMeterContextError(null);
-    void getBillMeterContext(record.billId, todayIso())
+    setMeterContext(null);
+    void getBillMeterContext(record.billId, readingAt)
       .then((context) => {
         if (!isCurrent) return;
         setMeterContext(context);
@@ -102,7 +129,13 @@ export default function TenantBillScreen() {
     return () => {
       isCurrent = false;
     };
-  }, [meterContextAttempt, period, record?.billId]);
+  }, [isLateReadingMode, lateReadingDate, meterContextAttempt, period, record?.billId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      reload();
+    }, [reload]),
+  );
 
   if (!room || !isOccupied(room)) {
     return (
@@ -139,6 +172,24 @@ export default function TenantBillScreen() {
 
   const handleSaveMeterReading = async () => {
     if (!record.billId || isSavingMeterReading) return;
+    const readingAt = isLateReadingMode
+      ? lateReadingDate
+      : meterContext?.currentReading?.readingAt ?? todayIso();
+    if (!readingAt) {
+      Alert.alert('Choose a reading date', 'Select the actual date the meter was read.');
+      return;
+    }
+    if (
+      isLateReadingMode &&
+      (!isValidIsoDate(readingAt) ||
+        !meterContext?.readingDateValid)
+    ) {
+      Alert.alert(
+        'Choose a valid reading date',
+        'The actual reading date must be within this bill period and during the tenancy.',
+      );
+      return;
+    }
     const value = parseMeterReadingInput(meterReadingValue);
     if (value === null) {
       Alert.alert('Invalid reading', 'Enter a valid nonnegative meter reading.');
@@ -150,18 +201,75 @@ export default function TenantBillScreen() {
       await saveBillMeterReading(
         record.billId,
         value,
-        meterContext?.currentReading?.readingAt ?? todayIso(),
+        readingAt,
       );
+      setIsLateReadingMode(false);
+      setLateReadingDate(null);
       setMeterContextAttempt((attempt) => attempt + 1);
       reload();
     } catch (error: unknown) {
       Alert.alert(
         'Could not save meter reading',
-        error instanceof Error ? error.message : 'Please try again.',
+        billMeterErrorMessage(error, 'Please try again.'),
       );
     } finally {
       setIsSavingMeterReading(false);
     }
+  };
+
+  const handleCarryForward = async () => {
+    if (!record.billId || isCarryingForward) return;
+    setIsCarryingForward(true);
+    try {
+      await carryForwardBillElectricity(record.billId);
+      reload();
+    } catch (error: unknown) {
+      Alert.alert(
+        'Could not carry usage forward',
+        billMeterErrorMessage(error, 'Please try again.'),
+      );
+    } finally {
+      setIsCarryingForward(false);
+    }
+  };
+
+  const confirmCarryForward = () => {
+    Alert.alert(
+      'Carry missed electricity usage forward?',
+      'The next bill with a meter reading will include all usage since the last saved reading, charged at that bill’s current rate. No reading will be invented, and this bill cannot be marked paid until the next reading is recorded.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Carry Forward', onPress: () => void handleCarryForward() },
+      ],
+    );
+  };
+
+  const handleCancelCarryForward = () => {
+    const billId = record.billId;
+    if (!billId || isCancellingCarryForward) return;
+    Alert.alert(
+      'Cancel carry-forward?',
+      'This can only be cancelled before a later meter reading is recorded.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Cancel Carry-Forward',
+          style: 'destructive',
+          onPress: () => {
+            setIsCancellingCarryForward(true);
+            void cancelBillElectricityRollForward(billId)
+              .then(reload)
+              .catch((error: unknown) => {
+                Alert.alert(
+                  'Could not cancel carry-forward',
+                  billMeterErrorMessage(error, 'Please try again.'),
+                );
+              })
+              .finally(() => setIsCancellingCarryForward(false));
+          },
+        },
+      ],
+    );
   };
 
   const canGoBack = period > minPeriod;
@@ -255,7 +363,12 @@ export default function TenantBillScreen() {
         {/* Month picker */}
         <View style={styles.periodRow}>
           <Pressable
-            onPress={() => setPeriod(shiftPeriod(period, -1))}
+            onPress={() => {
+              setIsLateReadingMode(false);
+              setLateReadingDate(null);
+              setPeriod(shiftPeriod(period, -1));
+              reload();
+            }}
             disabled={!canGoBack}
             hitSlop={12}
             accessibilityLabel="Previous month"
@@ -268,7 +381,12 @@ export default function TenantBillScreen() {
           </Pressable>
           <Text style={styles.periodText}>{periodLabel(period)}</Text>
           <Pressable
-            onPress={() => setPeriod(shiftPeriod(period, 1))}
+            onPress={() => {
+              setIsLateReadingMode(false);
+              setLateReadingDate(null);
+              setPeriod(shiftPeriod(period, 1));
+              reload();
+            }}
             disabled={!canGoForward}
             hitSlop={12}
             accessibilityLabel="Next month"
@@ -289,7 +407,23 @@ export default function TenantBillScreen() {
           meterContextError={meterContextError}
           meterReadingValue={meterReadingValue}
           isSavingMeterReading={isSavingMeterReading}
+          isLateReadingMode={isLateReadingMode}
+          lateReadingDate={lateReadingDate}
+          isCarryingForward={isCarryingForward}
+          isCancellingCarryForward={isCancellingCarryForward}
           onChangeMeterReading={(text) => setMeterReadingValue(sanitizeMeterReadingInput(text))}
+          onSelectLateReadingDate={setLateReadingDate}
+          onStartLateReading={() => {
+            setLateReadingDate(null);
+            setMeterReadingValue('');
+            setIsLateReadingMode(true);
+          }}
+          onCancelLateReading={() => {
+            setIsLateReadingMode(false);
+            setLateReadingDate(null);
+          }}
+          onCarryForward={confirmCarryForward}
+          onCancelCarryForward={handleCancelCarryForward}
           onSaveMeterReading={() => void handleSaveMeterReading()}
           onChangeStatus={handleChangeStatus}
         />

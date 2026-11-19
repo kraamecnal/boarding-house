@@ -1,11 +1,28 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { useState } from 'react';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import type { BillRecord, BillStatus } from '@/contexts/BillsContext';
 import type { OccupiedRoom } from '@/contexts/RoomsContext';
 import { FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
-import { computeTotals, formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
+import {
+  computeTotals,
+  formatPeso,
+  formatShortDate,
+  periodLabel,
+  todayIso,
+} from '@/utils/billing';
 import type { BillMeterContext } from '@/utils/meterBilling';
+import { dateFromLocalIso, isValidIsoDate, toLocalIsoDate } from '@/utils/meterReadings';
 
 type Props = {
   room: OccupiedRoom;
@@ -15,7 +32,16 @@ type Props = {
   meterContextError: string | null;
   meterReadingValue: string;
   isSavingMeterReading: boolean;
+  isLateReadingMode: boolean;
+  lateReadingDate: string | null;
+  isCarryingForward: boolean;
+  isCancellingCarryForward: boolean;
   onChangeMeterReading: (text: string) => void;
+  onSelectLateReadingDate: (date: string | null) => void;
+  onStartLateReading: () => void;
+  onCancelLateReading: () => void;
+  onCarryForward: () => void;
+  onCancelCarryForward: () => void;
   onSaveMeterReading: () => void;
   onChangeStatus: (status: BillStatus) => void;
 };
@@ -28,10 +54,20 @@ export default function BillStatement({
   meterContextError,
   meterReadingValue,
   isSavingMeterReading,
+  isLateReadingMode,
+  lateReadingDate,
+  isCarryingForward,
+  isCancellingCarryForward,
   onChangeMeterReading,
+  onSelectLateReadingDate,
+  onStartLateReading,
+  onCancelLateReading,
+  onCarryForward,
+  onCancelCarryForward,
   onSaveMeterReading,
   onChangeStatus,
 }: Props) {
+  const [showLateReadingDatePicker, setShowLateReadingDatePicker] = useState(false);
   const totals = computeTotals(room.monthlyRate, record.electricity);
   const issuedDateLabel =
     record.issuedDate && record.issuedDate !== 'Not yet issued'
@@ -54,6 +90,28 @@ export default function BillStatement({
     record.status !== 'paid' &&
     !meteredElectricity &&
     !manualElectricity;
+  const today = todayIso();
+  const billPeriodEnd = record.periodEnd ?? meterContext?.periodEnd ?? null;
+  const billPeriodEnded = billPeriodEnd !== null && today > billPeriodEnd;
+  const canResolveMissedReading =
+    billPeriodEnded &&
+    record.billId !== null &&
+    !record.isFinalized &&
+    record.status !== 'paid' &&
+    !meteredElectricity &&
+    !manualElectricity &&
+    !record.electricityRollForwardToBillId;
+  const billPeriodStart = record.periodStart ?? meterContext?.periodStart ?? null;
+  const lateDateMax =
+    billPeriodEnd && billPeriodEnd < today ? billPeriodEnd : today;
+  const lateDateBoundsValid = Boolean(billPeriodStart && lateDateMax >= billPeriodStart);
+  const lateDateSyntaxValid = Boolean(lateReadingDate && isValidIsoDate(lateReadingDate));
+  const lateDateSelected = lateDateSyntaxValid && meterContext?.readingDateValid === true;
+  const lateDatePickerValue = dateFromLocalIso(
+    lateReadingDate && isValidIsoDate(lateReadingDate)
+      ? lateReadingDate
+      : lateDateMax,
+  );
 
   return (
     <View style={styles.sheet}>
@@ -112,7 +170,226 @@ export default function BillStatement({
         ) : (
           <View style={styles.electricitySection}>
             <Text style={styles.electricityTitle}>Electricity</Text>
-            {meteredElectricity ? (
+            {record.electricityRollForwardFromPeriods.length > 0 && (
+              <Text style={styles.rollForwardNotice}>
+                This bill includes electricity usage rolled forward from{' '}
+                {record.electricityRollForwardFromPeriods.map(periodLabel).join(', ')}.
+                The full interval is charged here; usage is not split between periods.
+              </Text>
+            )}
+            {record.electricityRollForwardFromPeriods.length > 0 &&
+              meterContext?.previousReading &&
+              meterContext.currentReading && (
+                <Text style={styles.rollForwardNotice}>
+                  Meter interval: {formatShortDate(meterContext.previousReading.readingAt)} to{' '}
+                  {formatShortDate(meterContext.currentReading.readingAt)} (
+                  {meterContext.previousReading.value.toLocaleString()} to{' '}
+                  {meterContext.currentReading.value.toLocaleString()} kWh).
+                </Text>
+              )}
+            {record.electricityRollForwardToBillId ? (
+              <View style={styles.rollForwardCard}>
+                <Text style={styles.rollForwardNotice}>
+                  {record.isFinalized
+                    ? `Electricity usage was rolled forward to the ${record.electricityRollForwardToPeriod ? periodLabel(record.electricityRollForwardToPeriod) : 'later'} bill.`
+                    : `Carry-forward is pending. The next reading and its electricity charge will be included on the ${record.electricityRollForwardToPeriod ? periodLabel(record.electricityRollForwardToPeriod) : 'later'} bill.`}
+                </Text>
+                {!record.isFinalized && (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isCancellingCarryForward}
+                    onPress={onCancelCarryForward}
+                    style={styles.secondaryMeterButton}>
+                    <Text style={styles.secondaryMeterButtonLabel}>
+                      {isCancellingCarryForward ? 'Cancelling…' : 'Cancel carry-forward'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+            ) : isLateReadingMode ? (
+              <View style={styles.lateReadingCard}>
+                <Text style={styles.lateReadingDescription}>
+                  Enter a reading that was actually taken during this bill period. Do not estimate
+                  or backdate a reading you did not take.
+                </Text>
+                <Text style={styles.readingDateLabel}>Actual reading date</Text>
+                {Platform.OS === 'web' ? (
+                  <TextInput
+                    accessibilityLabel="Actual meter reading date"
+                    style={styles.meterInput}
+                    value={lateReadingDate ?? ''}
+                    onChangeText={(text) => onSelectLateReadingDate(text || null)}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#8A94A6"
+                    maxLength={10}
+                  />
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setShowLateReadingDatePicker(true)}
+                    style={styles.readingDateField}>
+                    <Text style={styles.readingDateText}>
+                      {lateReadingDate && isValidIsoDate(lateReadingDate)
+                        ? formatShortDate(lateReadingDate)
+                        : 'Choose the date the reading was taken'}
+                    </Text>
+                    <Ionicons name="calendar-outline" size={20} color="#1E3A8A" />
+                  </Pressable>
+                )}
+                {!lateDateBoundsValid && (
+                  <Text style={styles.meterError}>
+                    No valid historical reading date is available for this bill period.
+                  </Text>
+                )}
+                {Platform.OS === 'android' && showLateReadingDatePicker && lateDateBoundsValid && (
+                  <DateTimePicker
+                    value={lateDatePickerValue}
+                    mode="date"
+                    display="default"
+                    minimumDate={dateFromLocalIso(billPeriodStart ?? lateDateMax)}
+                    maximumDate={dateFromLocalIso(lateDateMax)}
+                    onValueChange={(_event, selected) => {
+                      setShowLateReadingDatePicker(false);
+                      if (selected) onSelectLateReadingDate(toLocalIsoDate(selected));
+                    }}
+                    onDismiss={() => setShowLateReadingDatePicker(false)}
+                  />
+                )}
+                {Platform.OS === 'ios' && (
+                  <Modal
+                    visible={showLateReadingDatePicker && lateDateBoundsValid}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={() => setShowLateReadingDatePicker(false)}>
+                    <View style={styles.datePickerOverlay}>
+                      <View style={styles.datePickerSheet}>
+                        {meterContext && lateDateBoundsValid && (
+                          <DateTimePicker
+                            value={lateDatePickerValue}
+                            mode="date"
+                            display="inline"
+                            minimumDate={dateFromLocalIso(billPeriodStart ?? lateDateMax)}
+                            maximumDate={dateFromLocalIso(lateDateMax)}
+                            onValueChange={(_event, selected) => {
+                              if (selected) onSelectLateReadingDate(toLocalIsoDate(selected));
+                            }}
+                          />
+                        )}
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => setShowLateReadingDatePicker(false)}
+                          style={styles.datePickerDoneButton}>
+                          <Text style={styles.datePickerDoneLabel}>Done</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </Modal>
+                )}
+                {lateReadingDate && !isValidIsoDate(lateReadingDate) && (
+                  <Text style={styles.meterError}>Enter a valid reading date.</Text>
+                )}
+                {lateDateSyntaxValid && meterContextLoading ? (
+                  <Text style={styles.electricityMessage}>Checking the reading history…</Text>
+                ) : lateDateSyntaxValid && meterContextError ? (
+                  <Text style={styles.meterError}>{meterContextError}</Text>
+                ) : lateDateSyntaxValid && meterContext && !meterContext.readingDateValid ? (
+                  <Text style={styles.meterError}>
+                    The selected date must be within this bill period and during the tenancy.
+                  </Text>
+                ) : lateDateSelected && !meterContext?.previousReading ? (
+                  <Text style={styles.meterError}>
+                    No earlier meter reading is available for this date.
+                  </Text>
+                ) : lateDateSelected && meterContext?.previousReading ? (
+                  <>
+                    <Line
+                      label="Previous Reading"
+                      value={`${meterContext.previousReading.value.toLocaleString()} kWh`}
+                    />
+                    {meterContext.currentReading && (
+                      <Line
+                        label="Reading Already Recorded"
+                        value={`${meterContext.currentReading.value.toLocaleString()} kWh`}
+                      />
+                    )}
+                    <TextInput
+                      accessibilityLabel="Historical present meter reading in kilowatt-hours"
+                      style={styles.meterInput}
+                      value={meterReadingValue}
+                      onChangeText={onChangeMeterReading}
+                      keyboardType="decimal-pad"
+                      placeholder="Present reading (kWh)"
+                      placeholderTextColor="#8A94A6"
+                      editable={!isSavingMeterReading && !meterContext.currentReading}
+                    />
+                    {meterContext.rate === null ? (
+                      <Text style={styles.electricityMessage}>
+                        Configure an electricity rate to continue.
+                      </Text>
+                    ) : (
+                      <Line label="Rate per kWh" value={formatPeso(meterContext.rate)} />
+                    )}
+                    {meterContext.rate !== null && (
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={isSavingMeterReading}
+                        onPress={onSaveMeterReading}
+                        style={[
+                          styles.meterButton,
+                          isSavingMeterReading && styles.meterButtonDisabled,
+                        ]}>
+                        <Text style={styles.meterButtonLabel}>
+                          {isSavingMeterReading
+                            ? 'Saving…'
+                            : meterContext.currentReading
+                              ? 'Use this reading'
+                              : 'Save late reading'}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </>
+                ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={isSavingMeterReading}
+                  onPress={onCancelLateReading}
+                  style={styles.secondaryMeterButton}>
+                  <Text style={styles.secondaryMeterButtonLabel}>Cancel late entry</Text>
+                </Pressable>
+              </View>
+            ) : canResolveMissedReading ? (
+              <View style={styles.missedReadingCard}>
+                <Text style={styles.missedReadingDescription}>
+                  This bill period ended without a reading. If you recorded a reading during that
+                  period, enter its actual date and value. Otherwise, carry the usage forward to
+                  the next bill with a reading.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={onStartLateReading}
+                  style={styles.meterButton}>
+                  <Text style={styles.meterButtonLabel}>Enter an actual past reading</Text>
+                </Pressable>
+                {record.electricityRollForwardAvailable ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isCarryingForward}
+                    onPress={onCarryForward}
+                    style={[
+                      styles.secondaryMeterButton,
+                      isCarryingForward && styles.meterButtonDisabled,
+                    ]}>
+                    <Text style={styles.secondaryMeterButtonLabel}>
+                      {isCarryingForward ? 'Saving…' : 'Carry missed usage forward'}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.electricityMessage}>
+                    Carry-forward is unavailable until the billing database is updated.
+                  </Text>
+                )}
+              </View>
+            ) : meteredElectricity ? (
               <>
                 {electricityItem ? (
                   <Line
@@ -532,6 +809,63 @@ const styles = StyleSheet.create({
     fontFamily: MONO,
     fontSize: 11,
   },
+  missedReadingCard: {
+    gap: 8,
+    padding: 10,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    backgroundColor: '#FFFBEB',
+  },
+  missedReadingDescription: {
+    color: '#713F12',
+    fontFamily: MONO,
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  lateReadingCard: {
+    gap: 8,
+    padding: 10,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+    backgroundColor: '#EFF6FF',
+  },
+  lateReadingDescription: {
+    color: '#1E3A8A',
+    fontFamily: MONO,
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  readingDateLabel: {
+    color: '#1A2B3C',
+    fontFamily: MONO,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  readingDateField: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
+  },
+  readingDateText: {
+    flex: 1,
+    color: '#1A2B3C',
+    fontFamily: MONO,
+    fontSize: 12,
+  },
+  meterError: {
+    color: '#B91C1C',
+    fontFamily: MONO,
+    fontSize: 11,
+  },
   meterInput: {
     borderWidth: 1,
     borderColor: '#93C5FD',
@@ -555,6 +889,59 @@ const styles = StyleSheet.create({
   meterButtonLabel: {
     color: '#FFFFFF',
     fontSize: 13,
+    fontWeight: '700',
+  },
+  secondaryMeterButton: {
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    borderRadius: 7,
+    backgroundColor: '#FFFFFF',
+  },
+  secondaryMeterButtonLabel: {
+    color: '#1D4ED8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  rollForwardCard: {
+    gap: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 7,
+    backgroundColor: '#EFF6FF',
+  },
+  rollForwardNotice: {
+    color: '#1E3A8A',
+    fontFamily: MONO,
+    fontSize: 11,
+    lineHeight: 17,
+  },
+  datePickerOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  datePickerSheet: {
+    padding: 16,
+    gap: 12,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  datePickerDoneButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 7,
+    backgroundColor: '#2563EB',
+  },
+  datePickerDoneLabel: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '700',
   },
   lineLabel: {

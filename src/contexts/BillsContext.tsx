@@ -40,6 +40,12 @@ export type BillItem = {
 export type BillRecord = {
   billId: string | null;
   period: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  electricityRollForwardAvailable: boolean;
+  electricityRollForwardToBillId: string | null;
+  electricityRollForwardToPeriod: string | null;
+  electricityRollForwardFromPeriods: string[];
   issuedDate: string;
   dueDate: string;
   electricity: string;
@@ -66,8 +72,10 @@ type DbBill = {
   bill_id: string;
   tenancy_id: string;
   period_start: string;
+  period_end: string;
   due_date: string;
   billed_at: string | null;
+  electricity_roll_forward_to_bill_id?: string | null;
   created_at: string;
   total_amount: number;
   paid_at: string | null;
@@ -77,7 +85,19 @@ type DbBill = {
 
 const entryKey = (roomId: string, period: string) => `${roomId}|${period}`;
 
-function mapBill(row: DbBill): BillRecord {
+function isMissingRollForwardColumn(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+
+  const code = 'code' in error ? error.code : null;
+  const message = 'message' in error ? error.message : null;
+  return (
+    (code === '42703' || code === 'PGRST204') &&
+    typeof message === 'string' &&
+    message.toLowerCase().includes('electricity_roll_forward_to_bill_id')
+  );
+}
+
+function mapBill(row: DbBill, electricityRollForwardAvailable: boolean): BillRecord {
   const items = (row.bill_items ?? []).map((item) => ({
     id: item.bill_item_id,
     itemType: item.item_type,
@@ -108,6 +128,12 @@ function mapBill(row: DbBill): BillRecord {
   return {
     billId: row.bill_id,
     period: row.period_start.slice(0, 7),
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    electricityRollForwardAvailable,
+    electricityRollForwardToBillId: row.electricity_roll_forward_to_bill_id ?? null,
+    electricityRollForwardToPeriod: null,
+    electricityRollForwardFromPeriods: [],
     issuedDate: row.billed_at ?? 'Not yet issued',
     dueDate: row.due_date,
     electricity,
@@ -125,6 +151,12 @@ function makeDefaultBill(room: Room | undefined, period: string): BillRecord {
   return {
     billId: null,
     period,
+    periodStart: null,
+    periodEnd: null,
+    electricityRollForwardAvailable: false,
+    electricityRollForwardToBillId: null,
+    electricityRollForwardToPeriod: null,
+    electricityRollForwardFromPeriods: [],
     issuedDate: 'Not yet issued',
     dueDate: dueDateFor(period, DUE_DAY_OF_NEXT_MONTH),
     electricity: '',
@@ -188,25 +220,53 @@ export function BillsProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const { data, error } = await getSupabaseClient()
+        const client = getSupabaseClient();
+        const primaryResult = await client
           .from('monthly_bill')
           .select(
-            'bill_id, tenancy_id, period_start, due_date, billed_at, created_at, total_amount, paid_at, is_paid, bill_items(bill_item_id,item_type,description,quantity,unit_price,amount)',
+            'bill_id, tenancy_id, period_start, period_end, due_date, billed_at, electricity_roll_forward_to_bill_id, created_at, total_amount, paid_at, is_paid, bill_items(bill_item_id,item_type,description,quantity,unit_price,amount)',
           )
           .in('tenancy_id', tenancyIds)
           .order('period_start', { ascending: false });
-        if (error) throw error;
+
+        let data = primaryResult.data as DbBill[] | null;
+        let queryError: unknown = primaryResult.error;
+        let electricityRollForwardAvailable = true;
+        if (queryError && isMissingRollForwardColumn(queryError)) {
+          electricityRollForwardAvailable = false;
+          const legacyResult = await client
+            .from('monthly_bill')
+            .select(
+              'bill_id, tenancy_id, period_start, period_end, due_date, billed_at, created_at, total_amount, paid_at, is_paid, bill_items(bill_item_id,item_type,description,quantity,unit_price,amount)',
+            )
+            .in('tenancy_id', tenancyIds)
+            .order('period_start', { ascending: false });
+          data = legacyResult.data as DbBill[] | null;
+          queryError = legacyResult.error;
+        }
+        if (queryError) throw queryError;
 
         const roomsByTenancy = new Map(
           rooms.filter(isOccupied).map((room) => [room.tenant.tenancyId, room]),
         );
         const nextRecords: BillEntries = {};
-        for (const row of (data ?? []) as DbBill[]) {
+        const billsById = new Map<string, BillRecord>();
+        const loadedBills: { roomId: string; bill: BillRecord }[] = [];
+        for (const row of data ?? []) {
           const room = roomsByTenancy.get(row.tenancy_id);
           if (room) {
-            const bill = mapBill(row);
+            const bill = mapBill(row, electricityRollForwardAvailable);
+            billsById.set(row.bill_id, bill);
+            loadedBills.push({ roomId: room.id, bill });
             nextRecords[recordKey(room.id, bill.period)] = bill;
           }
+        }
+        for (const { bill } of loadedBills) {
+          if (!bill.electricityRollForwardToBillId) continue;
+          const target = billsById.get(bill.electricityRollForwardToBillId);
+          if (!target) continue;
+          bill.electricityRollForwardToPeriod = target.period;
+          target.electricityRollForwardFromPeriods.push(bill.period);
         }
         if (isCurrent) setRecords(nextRecords);
       } catch (error: unknown) {
@@ -242,6 +302,13 @@ export function BillsProvider({ children }: { children: ReactNode }) {
       setStatus: async (roomId, period, status) => {
         const record = records[recordKey(roomId, period)];
         if (!record?.billId) throw new Error('This monthly bill has not been generated yet.');
+        if (
+          status === 'paid' &&
+          record.electricityRollForwardToBillId &&
+          !record.isFinalized
+        ) {
+          throw new Error('This bill cannot be marked paid until its carry-forward is completed.');
+        }
         const { error } = await getSupabaseClient()
           .from('monthly_bill')
           .update({
