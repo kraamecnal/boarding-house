@@ -62,6 +62,9 @@ The migrations in `supabase/migrations/` add tenancy-specific charge overrides a
 
 Tenant document paths are saved in `tenants.id_photo_url` and `tenancy.agreement_photo_url`. The app uses short-lived signed URLs for viewing; it never stores those URLs or uses a service-role key. Camera access is configured through the Expo Image Picker plugin, so rebuild native development clients after changing the permission configuration.
 
+Apply the `delete_rooms_with_tenant_archive` migration before using Rooms delete mode. It archives affected tenancies and document paths before deleting rooms, preserves their bills and meter readings, and restores owner-only access to archived bill items after a room is removed.
+To exercise the rollback-only regression fixtures, apply the migration to an isolated test database with the existing schema, then run `supabase db query --file supabase\tests\delete_rooms_with_tenant_archive.sql` against that database.
+
 Rooms have a permanent monthly meter-reading day (default 15; days beyond a month’s length use that month’s final day). Record the move-in reading on the tenant’s move-in date and a closing reading when ending a tenancy. Scheduled present readings are entered from the Monthly Bill; the database saves the reading and electricity bill item together, using the tenancy rate first and the owner default second. A missing move-in reading or rate never creates an estimated charge. Tenancy boundary readings are required before a tenancy can end, preventing usage from being assigned to a different tenant. Existing manual electricity items and finalized bills remain unchanged. Apply `meter_readings_workflow` and then `automatic_meter_billing` in order before using the updated room, tenant, or billing screens.
 
 The Manage tab shows the dashboard summary. Open the gear menu to visit Billing charges or Profile; the Profile page links to the About and Version information.

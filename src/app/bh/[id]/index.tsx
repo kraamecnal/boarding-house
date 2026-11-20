@@ -1,15 +1,63 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Stack, useLocalSearchParams, usePreventRemove, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import AnimatedFAB from '@/components/AnimatedFAB';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import { formatPeso } from '@/utils/billing';
+import { getSupabaseClient } from '@/utils/supabase';
+
+function getDeleteErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error &&
+      typeof error.message === 'string') return error.message;
+  return 'Could not delete the selected rooms.';
+}
 
 export default function BoardingHouseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(() => new Set());
+  const [isConfirmVisible, setIsConfirmVisible] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const cancelDeleteMode = () => {
+    if (isDeleting) return;
+    setDeleteMode(false);
+    setSelectedRoomIds(new Set());
+    setIsConfirmVisible(false);
+    setDeleteError(null);
+  };
+  usePreventRemove(deleteMode, cancelDeleteMode);
+
+  const toggleRoomSelection = (roomId: string) => {
+    setSelectedRoomIds((current) => {
+      const next = new Set(current);
+      if (next.has(roomId)) next.delete(roomId);
+      else next.add(roomId);
+      return next;
+    });
+  };
+
+  const requestDeletion = () => {
+    if (selectedRoomIds.size === 0) {
+      setNotice('No rooms selected.');
+      return;
+    }
+    setDeleteError(null);
+    setIsConfirmVisible(true);
+  };
   const {
     getHouseById,
     isLoading: isLoadingHouses,
@@ -23,6 +71,30 @@ export default function BoardingHouseScreen() {
     loadError: roomsError,
     reload: reloadRooms,
   } = useRooms();
+
+  const confirmDeletion = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const selectedCount = selectedRoomIds.size;
+      const { data, error } = await getSupabaseClient().rpc('delete_rooms_with_tenant_archive', {
+        p_boarding_house_id: id,
+        p_room_ids: [...selectedRoomIds],
+      });
+      if (error) throw error;
+      if (data !== selectedCount) throw new Error('The selected rooms were not all deleted.');
+      setIsConfirmVisible(false);
+      setDeleteMode(false);
+      setSelectedRoomIds(new Set());
+      reloadRooms();
+      setNotice(`${selectedCount} ${selectedCount === 1 ? 'room' : 'rooms'} deleted.`);
+    } catch (error: unknown) {
+      setDeleteError(getDeleteErrorMessage(error));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (!house) {
     return (
@@ -66,11 +138,29 @@ export default function BoardingHouseScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: `${house.name} Rooms` }} />
+      <Stack.Screen options={{
+        title: `${house.name} Rooms`,
+        headerRight: () => (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={deleteMode ? 'Cancel room deletion' : 'Delete rooms'}
+            accessibilityState={{ selected: deleteMode }}
+            disabled={isDeleting}
+            onPress={() => {
+              if (deleteMode) cancelDeleteMode();
+              else setDeleteMode(true);
+            }}
+            style={styles.headerAction}
+          >
+            <Ionicons name="trash-outline" size={22} color={deleteMode ? '#DC2626' : '#64748B'} />
+          </Pressable>
+        ),
+      }} />
 
       {rooms.length === 0 ? (
         <Text style={styles.emptyText}>
-          No rooms registered yet for {house.name}.{'\n'}Tap the + button to add one.
+          No rooms registered yet for {house.name}.
+          {!deleteMode && <>{'\n'}Tap the + button to add one.</>}
         </Text>
       ) : (
         <FlatList
@@ -86,20 +176,42 @@ export default function BoardingHouseScreen() {
           keyExtractor={(room) => room.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
+            const selected = selectedRoomIds.has(item.id);
+            const onPress = () => {
+              if (deleteMode) toggleRoomSelection(item.id);
+              else router.push(`/bh/${id}/room/${item.id}`);
+            };
+            const checkbox = (
+              <Ionicons
+                color={selected ? '#2563EB' : '#64748B'}
+                name={selected ? 'checkbox' : 'square-outline'}
+                size={22}
+              />
+            );
             if (!isOccupied(item)) {
               return (
                 <Pressable
-                  onPress={() => router.push(`/bh/${id}/room/${item.id}`)}
+                  onPress={onPress}
                   style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                   accessibilityRole="button"
-                  accessibilityLabel={`Open ${item.roomName}, currently vacant`}
+                  accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${item.roomName}` : `Open ${item.roomName}, currently vacant`}
+                  accessibilityState={deleteMode ? { selected } : undefined}
                 >
                   <View style={styles.cardHeader}>
                     <Text style={styles.roomTitle}>{item.roomName}</Text>
                     <StatusBadge occupied={false} />
                   </View>
-                  <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
-                  <Text style={styles.cta}>Tap to view room details</Text>
+                  {deleteMode ? (
+                    <View style={styles.tenantRow}>
+                      <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
+                      {checkbox}
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
+                      <Text style={styles.cta}>Tap to view room details</Text>
+                    </>
+                  )}
                 </Pressable>
               );
             }
@@ -108,10 +220,11 @@ export default function BoardingHouseScreen() {
 
             return (
               <Pressable
-                onPress={() => router.push(`/bh/${id}/room/${item.id}`)}
+                onPress={onPress}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`Open ${item.roomName}, ${tenant.firstName} ${tenant.lastName}`}
+                accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${item.roomName}` : `Open ${item.roomName}, ${tenant.firstName} ${tenant.lastName}`}
+                accessibilityState={deleteMode ? { selected } : undefined}
               >
                 <View style={styles.cardHeader}>
                   <Text style={styles.roomTitle}>{item.roomName}</Text>
@@ -122,7 +235,7 @@ export default function BoardingHouseScreen() {
                   <Text style={styles.tenantName}>
                     {tenant.firstName} {tenant.lastName}
                   </Text>
-                  <Ionicons name="chevron-forward" size={22} color="#8A94A6" />
+                  {deleteMode ? checkbox : <Ionicons name="chevron-forward" size={22} color="#8A94A6" />}
                 </View>
 
                 <Text style={styles.cardLine}>{formatPeso(item.monthlyRate)} / month</Text>
@@ -133,9 +246,48 @@ export default function BoardingHouseScreen() {
       )}
 
       <AnimatedFAB
-        onPress={() => router.push(`/bh/${id}/room/new`)}
-        accessibilityLabel="Register a new room"
+        backgroundColor={deleteMode ? '#DC2626' : undefined}
+        icon={deleteMode ? <Ionicons color="#FFFFFF" name="trash-outline" size={23} /> : undefined}
+        onPress={deleteMode ? requestDeletion : () => router.push(`/bh/${id}/room/new`)}
+        accessibilityLabel={deleteMode ? 'Delete selected rooms' : 'Register a new room'}
       />
+      {notice && (
+        <View accessibilityLiveRegion="polite" style={styles.notice}>
+          <Text style={styles.noticeText}>{notice}</Text>
+        </View>
+      )}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={isConfirmVisible}
+        onRequestClose={() => { if (!isDeleting) setIsConfirmVisible(false); }}
+      >
+        <View style={styles.dialogBackdrop}>
+          <View accessibilityRole="alert" style={styles.dialog}>
+            <Text style={styles.dialogTitle}>Delete rooms?</Text>
+            <Text style={styles.dialogBody}>
+              {selectedRoomIds.size} {selectedRoomIds.size === 1 ? 'room' : 'rooms'} selected.
+              {'\n\n'}
+              Each selected room and its custom charges will be permanently deleted and cannot
+              be recovered. Any active or scheduled tenants in those rooms will be archived.
+              Their ID and signed agreement photos will be kept in the archive.
+            </Text>
+            {deleteError && <Text accessibilityLiveRegion="polite" style={styles.dialogError}>{deleteError}</Text>}
+            <View style={styles.dialogActions}>
+              <Pressable accessibilityRole="button" disabled={isDeleting}
+                onPress={() => setIsConfirmVisible(false)}
+                style={({ pressed }) => [styles.cancelButton, pressed && !isDeleting && styles.dialogButtonPressed]}>
+                <Text style={styles.cancelLabel}>Cancel</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" disabled={isDeleting}
+                onPress={() => void confirmDeletion()}
+                style={({ pressed }) => [styles.deleteButton, pressed && !isDeleting && styles.dialogButtonPressed, isDeleting && styles.deleteButtonDisabled]}>
+                <Text style={styles.deleteLabel}>{isDeleting ? 'Deleting…' : 'Delete'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -189,6 +341,13 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 4,
     gap: 2,
+  },
+  headerAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
   },
   houseAddress: {
     fontSize: 14,
@@ -254,4 +413,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2563EB',
   },
+  notice: {
+    position: 'absolute', left: 24, right: 24, bottom: 104,
+    alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12,
+    borderRadius: 12, backgroundColor: '#1F2937', elevation: 5,
+  },
+  noticeText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  dialogBackdrop: {
+    flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+  },
+  dialog: { width: '100%', maxWidth: 420, gap: 14, padding: 22, borderRadius: 18, backgroundColor: '#FFFFFF' },
+  dialogTitle: { color: '#1E3A8A', fontSize: 20, fontWeight: '700' },
+  dialogBody: { color: '#475569', fontSize: 14, lineHeight: 21 },
+  dialogError: { color: '#B42318', fontSize: 13 },
+  dialogActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 4 },
+  cancelButton: {
+    minHeight: 44, justifyContent: 'center', paddingHorizontal: 18,
+    borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, backgroundColor: '#FFFFFF',
+  },
+  cancelLabel: { color: '#475569', fontSize: 14, fontWeight: '700' },
+  deleteButton: {
+    minHeight: 44, minWidth: 92, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 18, borderRadius: 10, backgroundColor: '#DC2626',
+  },
+  deleteButtonDisabled: { opacity: 0.65 },
+  deleteLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  dialogButtonPressed: { opacity: 0.8 },
 });
