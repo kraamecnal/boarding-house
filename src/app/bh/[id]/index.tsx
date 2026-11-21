@@ -1,11 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useLocalSearchParams, usePreventRemove, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  GestureResponderEvent,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AnimatedFAB from '@/components/AnimatedFAB';
+import RoomEditModal from '@/components/RoomEditModal';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
-import { isOccupied, useRooms } from '@/contexts/RoomsContext';
+import { isOccupied, useRooms, type Room } from '@/contexts/RoomsContext';
 import { formatPeso } from '@/utils/billing';
 import { getSupabaseClient } from '@/utils/supabase';
 
@@ -19,12 +31,21 @@ function getDeleteErrorMessage(error: unknown): string {
 export default function BoardingHouseScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(() => new Set());
   const [isConfirmVisible, setIsConfirmVisible] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    room: Room;
+    left: number;
+    top: number;
+  } | null>(null);
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const longPressHandledRef = useRef(false);
 
   useEffect(() => {
     if (!notice) return;
@@ -34,6 +55,7 @@ export default function BoardingHouseScreen() {
 
   const cancelDeleteMode = () => {
     if (isDeleting) return;
+    setContextMenu(null);
     setDeleteMode(false);
     setSelectedRoomIds(new Set());
     setIsConfirmVisible(false);
@@ -57,6 +79,44 @@ export default function BoardingHouseScreen() {
     }
     setDeleteError(null);
     setIsConfirmVisible(true);
+  };
+
+  const showContextMenu = (room: Room, event: GestureResponderEvent) => {
+    if (deleteMode) return;
+    longPressHandledRef.current = true;
+
+    const menuWidth = 112;
+    const menuHeight = 46;
+    const minimumLeft = 12;
+    const maximumLeft = Math.max(minimumLeft, windowWidth - menuWidth - 12);
+    const minimumTop = insets.top + 64;
+    const maximumTop = Math.max(
+      minimumTop,
+      windowHeight - Math.max(insets.bottom, 16) - 104 - menuHeight,
+    );
+    const proposedLeft = event.nativeEvent.pageX - menuWidth / 2;
+    const proposedTop = event.nativeEvent.pageY + 10;
+
+    setContextMenu({
+      room,
+      left: Math.min(Math.max(proposedLeft, minimumLeft), maximumLeft),
+      top:
+        proposedTop <= maximumTop
+          ? Math.max(proposedTop, minimumTop)
+          : Math.max(event.nativeEvent.pageY - menuHeight - 10, minimumTop),
+    });
+  };
+
+  const handleCardPress = (room: Room) => {
+    if (deleteMode) {
+      toggleRoomSelection(room.id);
+      return;
+    }
+    if (longPressHandledRef.current) {
+      longPressHandledRef.current = false;
+      return;
+    }
+    router.push(`/bh/${id}/room/${room.id}`);
   };
   const {
     getHouseById,
@@ -148,7 +208,10 @@ export default function BoardingHouseScreen() {
             disabled={isDeleting}
             onPress={() => {
               if (deleteMode) cancelDeleteMode();
-              else setDeleteMode(true);
+              else {
+                setContextMenu(null);
+                setDeleteMode(true);
+              }
             }}
             style={styles.headerAction}
           >
@@ -177,10 +240,6 @@ export default function BoardingHouseScreen() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const selected = selectedRoomIds.has(item.id);
-            const onPress = () => {
-              if (deleteMode) toggleRoomSelection(item.id);
-              else router.push(`/bh/${id}/room/${item.id}`);
-            };
             const checkbox = (
               <Ionicons
                 color={selected ? '#2563EB' : '#64748B'}
@@ -191,7 +250,12 @@ export default function BoardingHouseScreen() {
             if (!isOccupied(item)) {
               return (
                 <Pressable
-                  onPress={onPress}
+                  delayLongPress={650}
+                  onLongPress={deleteMode ? undefined : (event) => showContextMenu(item, event)}
+                  onPressIn={() => {
+                    longPressHandledRef.current = false;
+                  }}
+                  onPress={() => handleCardPress(item)}
                   style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                   accessibilityRole="button"
                   accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${item.roomName}` : `Open ${item.roomName}, currently vacant`}
@@ -220,7 +284,12 @@ export default function BoardingHouseScreen() {
 
             return (
               <Pressable
-                onPress={onPress}
+                delayLongPress={650}
+                onLongPress={deleteMode ? undefined : (event) => showContextMenu(item, event)}
+                onPressIn={() => {
+                  longPressHandledRef.current = false;
+                }}
+                onPress={() => handleCardPress(item)}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 accessibilityRole="button"
                 accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${item.roomName}` : `Open ${item.roomName}, ${tenant.firstName} ${tenant.lastName}`}
@@ -255,6 +324,49 @@ export default function BoardingHouseScreen() {
         <View accessibilityLiveRegion="polite" style={styles.notice}>
           <Text style={styles.noticeText}>{notice}</Text>
         </View>
+      )}
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setContextMenu(null)}
+        statusBarTranslucent
+        transparent
+        visible={contextMenu !== null}>
+        <View style={styles.contextMenuOverlay}>
+          <Pressable
+            accessibilityLabel="Dismiss edit menu"
+            accessibilityRole="button"
+            onPress={() => setContextMenu(null)}
+            style={StyleSheet.absoluteFill}
+          />
+          {contextMenu && (
+            <Pressable
+              accessibilityLabel={`Edit ${contextMenu.room.roomName}`}
+              accessibilityRole="menuitem"
+              onPress={() => {
+                setEditingRoom(contextMenu.room);
+                setContextMenu(null);
+              }}
+              style={({ pressed }) => [
+                styles.contextMenu,
+                { left: contextMenu.left, top: contextMenu.top },
+                pressed && styles.contextMenuPressed,
+              ]}>
+              <Ionicons color="#2563EB" name="create-outline" size={19} />
+              <Text style={styles.contextMenuLabel}>Edit</Text>
+            </Pressable>
+          )}
+        </View>
+      </Modal>
+      {editingRoom && (
+        <RoomEditModal
+          room={editingRoom}
+          onCancel={() => setEditingRoom(null)}
+          onSaved={(room) => {
+            setEditingRoom(null);
+            setContextMenu(null);
+            setNotice(`${room.roomName} updated.`);
+          }}
+        />
       )}
       <Modal
         animationType="fade"
@@ -419,6 +531,35 @@ const styles = StyleSheet.create({
     borderRadius: 12, backgroundColor: '#1F2937', elevation: 5,
   },
   noticeText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  contextMenuOverlay: {
+    flex: 1,
+  },
+  contextMenu: {
+    position: 'absolute',
+    width: 112,
+    height: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.16,
+    shadowRadius: 7,
+    elevation: 6,
+  },
+  contextMenuPressed: {
+    backgroundColor: '#EFF6FF',
+  },
+  contextMenuLabel: {
+    color: '#1E293B',
+    fontSize: 14,
+    fontWeight: '700',
+  },
   dialogBackdrop: {
     flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24,
     backgroundColor: 'rgba(15, 23, 42, 0.55)',

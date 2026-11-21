@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -13,6 +13,8 @@ import {
 
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
+import { useRooms } from '@/contexts/RoomsContext';
 import { getSupabaseClient } from '@/utils/supabase';
 
 type TenantStatus = 'active' | 'scheduled' | 'archived';
@@ -21,6 +23,7 @@ type TenantRow = {
   name: string;
   roomName: string;
   boardingHouseName: string;
+  roomId?: string;
   moveInDate: string | null;
   moveOutDate: string | null;
   boardingHouseId?: string;
@@ -54,6 +57,8 @@ function getRelatedRecord<T extends object>(
 export default function TenantsScreen() {
   const router = useRouter();
   const { session } = useAuth();
+  const { boardingHouses } = useBoardingHouses();
+  const { rooms } = useRooms();
   const [status, setStatus] = useState<TenantStatus>('active');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -62,6 +67,14 @@ export default function TenantsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const currentHouseNames = useMemo(
+    () => new Map(boardingHouses.map((house) => [house.id, house.name])),
+    [boardingHouses],
+  );
+  const currentRoomNames = useMemo(
+    () => new Map(rooms.map((room) => [room.id, room.roomName])),
+    [rooms],
+  );
 
   useEffect(() => {
     let isCurrent = true;
@@ -150,6 +163,7 @@ export default function TenantsScreen() {
               boardingHouseName: boardingHouse?.name ?? 'Boarding house unavailable',
               moveInDate: row.move_in_date,
               moveOutDate: null,
+              roomId: room?.room_id,
               boardingHouseId: room?.boarding_house_id,
             };
           });
@@ -257,8 +271,16 @@ export default function TenantsScreen() {
                   <Ionicons color={DashboardColors.primary} name="chevron-forward" size={20} />
                 )}
               </View>
-              <Text style={styles.roomName}>{tenant.roomName}</Text>
-              <Text style={styles.dateText}>{tenant.boardingHouseName}</Text>
+              <Text style={styles.roomName}>
+                {tenant.roomId
+                  ? (currentRoomNames.get(tenant.roomId) ?? tenant.roomName)
+                  : tenant.roomName}
+              </Text>
+              <Text style={styles.dateText}>
+                {tenant.boardingHouseId
+                  ? (currentHouseNames.get(tenant.boardingHouseId) ?? tenant.boardingHouseName)
+                  : tenant.boardingHouseName}
+              </Text>
               <Text style={styles.dateText}>
                 {status === 'scheduled' ? 'Move-in: ' : 'Moved in: '}{formatDate(tenant.moveInDate)}
               </Text>

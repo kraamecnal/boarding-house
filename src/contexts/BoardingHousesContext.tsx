@@ -7,6 +7,7 @@ import { getSupabaseClient } from '@/utils/supabase';
 export type { BoardingHouse };
 
 type NewHouseInput = Pick<BoardingHouse, 'name' | 'address'>;
+type EditHouseInput = NewHouseInput;
 type BoardingHouseRow = {
   boarding_house_id: string;
   name: string | null;
@@ -22,9 +23,17 @@ type ContextValue = {
   getHouseById: (id: string) => BoardingHouse | undefined;
   isNameTaken: (name: string) => boolean;
   addHouse: (input: NewHouseInput) => Promise<void>;
+  updateHouse: (id: string, input: EditHouseInput) => Promise<BoardingHouse>;
 };
 
 const BoardingHousesContext = createContext<ContextValue | undefined>(undefined);
+
+export class DuplicateBoardingHouseNameError extends Error {
+  constructor() {
+    super('You already have a boarding house with this name.');
+    this.name = 'DuplicateBoardingHouseNameError';
+  }
+}
 
 function mapHouse(row: BoardingHouseRow): BoardingHouse {
   return {
@@ -99,6 +108,60 @@ export function BoardingHousesProvider({ children }: { children: ReactNode }) {
           .single();
         if (error) throw error;
         setBoardingHouses((current) => [mapHouse(data), ...current]);
+      },
+      updateHouse: async (id, input) => {
+        if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
+        const name = input.name.trim();
+        const address = input.address.trim() || null;
+        if (!name) throw new Error('Enter a boarding house name.');
+
+        const client = getSupabaseClient();
+        const { data: otherHouses, error: duplicateCheckError } = await client
+          .from('boarding_house')
+          .select('boarding_house_id, name')
+          .eq('owner_id', ownerId)
+          .neq('boarding_house_id', id);
+        if (duplicateCheckError) {
+          throw new Error(
+            duplicateCheckError.message ||
+              'Could not check existing boarding house names. Please try again.',
+          );
+        }
+
+        const normalizedName = name.toLowerCase();
+        if (
+          (otherHouses ?? []).some(
+            (house) => house.name?.trim().toLowerCase() === normalizedName,
+          )
+        ) {
+          throw new DuplicateBoardingHouseNameError();
+        }
+
+        const { data, error } = await client
+          .from('boarding_house')
+          .update({ name, address })
+          .eq('boarding_house_id', id)
+          .select('boarding_house_id, name, address, last_updated_at')
+          .single();
+        if (error) {
+          if (error.code === 'PGRST116') {
+            throw new Error(
+              'The boarding house could not be updated. It may no longer exist or you may not have access.',
+            );
+          }
+          throw new Error(error.message || 'Could not save the boarding house. Please try again.');
+        }
+        if (!data) {
+          throw new Error(
+            'The boarding house could not be updated. It may no longer exist or you may not have access.',
+          );
+        }
+
+        const updatedHouse = mapHouse(data);
+        setBoardingHouses((current) =>
+          current.map((house) => (house.id === updatedHouse.id ? updatedHouse : house)),
+        );
+        return updatedHouse;
       },
     }),
     [boardingHouses, isLoading, loadError, ownerId],

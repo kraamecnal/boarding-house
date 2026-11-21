@@ -59,6 +59,7 @@ export type NewTenantInput = {
   contractImage: TenantDocumentImage;
 };
 export type TenantChargeOverrides = Partial<Record<ChargeType, string>>;
+type EditRoomInput = Pick<Room, 'roomName' | 'monthlyRate'>;
 
 type RoomRow = {
   room_id: string;
@@ -103,6 +104,7 @@ type ContextValue = {
   getRoomById: (id: string) => Room | undefined;
   isRoomNameTaken: (boardingHouseId: string, roomName: string) => boolean;
   addRoom: (input: NewRoomInput) => Promise<void>;
+  updateRoom: (id: string, input: EditRoomInput) => Promise<Room>;
   assignTenant: (
     roomId: string,
     input: NewTenantInput,
@@ -122,6 +124,13 @@ type ContextValue = {
 
 export function isOccupied(room: Room): room is OccupiedRoom {
   return room.status === 'occupied' && room.tenant !== null;
+}
+
+export class DuplicateRoomNameError extends Error {
+  constructor() {
+    super('This boarding house already has a room with this name.');
+    this.name = 'DuplicateRoomNameError';
+  }
 }
 
 // add one month then minus 1 day
@@ -442,6 +451,106 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
                 ...current,
               ],
         );
+      },
+      updateRoom: async (id, input) => {
+        if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
+        const currentRoom = rooms.find((room) => room.id === id);
+        if (!currentRoom) throw new Error('This room is no longer available.');
+
+        const roomName = input.roomName.trim();
+        if (!roomName) throw new Error('Enter a room name.');
+        const nameChanged = roomName !== currentRoom.roomName;
+        const rentChanged = input.monthlyRate !== currentRoom.monthlyRate;
+        if (!nameChanged && !rentChanged) return currentRoom;
+
+        const client = getSupabaseClient();
+        if (nameChanged) {
+          const { data: otherRooms, error: duplicateCheckError } = await client
+            .from('rooms')
+            .select('room_id, room_name')
+            .eq('boarding_house_id', currentRoom.boardingHouseId)
+            .neq('room_id', id);
+          if (duplicateCheckError) throw duplicateCheckError;
+          const normalizedName = roomName.toLowerCase();
+          if (
+            (otherRooms ?? []).some(
+              (room) => room.room_name?.trim().toLowerCase() === normalizedName,
+            )
+          ) {
+            throw new DuplicateRoomNameError();
+          }
+        }
+
+        let updatedRoom: Room;
+        if (rentChanged) {
+          const parameters: {
+            p_room_id: string;
+            p_room_name?: string;
+            p_monthly_rate: number;
+          } = {
+            p_room_id: id,
+            p_monthly_rate: input.monthlyRate,
+          };
+          if (nameChanged) parameters.p_room_name = roomName;
+
+          const { data, error } = await client.rpc(
+            'edit_room_with_rent_sync',
+            parameters,
+          );
+          if (error) {
+            if (error.code === '23505') throw new DuplicateRoomNameError();
+            throw error;
+          }
+          if (
+            !data ||
+            typeof data !== 'object' ||
+            !('room_id' in data) ||
+            data.room_id !== id ||
+            !('tenancy_count' in data) ||
+            !('tenancy_updated_count' in data) ||
+            data.tenancy_count !== data.tenancy_updated_count
+          ) {
+            throw new Error(
+              'The room and current tenancy rent could not be fully updated. Please try again.',
+            );
+          }
+          updatedRoom = {
+            ...currentRoom,
+            roomName: 'room_name' in data ? String(data.room_name) : roomName,
+            monthlyRate:
+              'monthly_rate' in data ? Number(data.monthly_rate) : input.monthlyRate,
+            createdAt:
+              'last_updated_at' in data
+                ? String(data.last_updated_at)
+                : currentRoom.createdAt,
+          };
+        } else {
+          const { data, error } = await client
+            .from('rooms')
+            .update({ room_name: roomName })
+            .eq('room_id', id)
+            .select('room_id, room_name, monthly_rate, last_updated_at')
+            .single();
+          if (error) {
+            if (error.code === '23505') throw new DuplicateRoomNameError();
+            if (error.code === 'PGRST116') {
+              throw new Error('The room could not be updated. It may not exist or be authorized.');
+            }
+            throw error;
+          }
+          if (!data) throw new Error('The room update returned no row.');
+          updatedRoom = {
+            ...currentRoom,
+            roomName: data.room_name,
+            monthlyRate: Number(data.monthly_rate),
+            createdAt: data.last_updated_at,
+          };
+        }
+
+        setRooms((current) =>
+          current.map((room) => (room.id === id ? updatedRoom : room)),
+        );
+        return updatedRoom;
       },
       assignTenant: async (roomId, input, customCharges = {}, onDocumentUpload) => {
         if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
