@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useRooms } from '@/contexts/RoomsContext';
+import RoomLabel, { formatRoomLabel } from '@/components/RoomLabel';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { formatShortDate } from '@/utils/billing';
 import {
   getRoomMeterReadings,
@@ -15,7 +17,9 @@ export default function MeterReadingHistoryScreen() {
   const params = useLocalSearchParams<{ roomId: string }>();
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const { getRoomById, isLoading: isLoadingRooms } = useRooms();
+  const { getHouseById } = useBoardingHouses();
   const room = roomId ? getRoomById(roomId) : undefined;
+  const houseName = room ? getHouseById(room.boardingHouseId)?.name : undefined;
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,10 +88,19 @@ export default function MeterReadingHistoryScreen() {
       ) : readings.length === 0 ? (
         <View style={styles.centered}>
           <Ionicons name="flash-outline" size={34} color="#2563EB" />
-          <Text style={styles.emptyText}>No meter readings have been recorded for {room.roomName}.</Text>
+          <Text style={styles.emptyText}>
+            No meter readings have been recorded for {formatRoomLabel(room.roomName, houseName)}.
+          </Text>
         </View>
       ) : (
         <FlatList
+          ListHeaderComponent={
+            <RoomLabel
+              boardingHouseName={houseName}
+              roomName={room.roomName}
+              style={styles.roomLabel}
+            />
+          }
           contentContainerStyle={styles.list}
           data={readings}
           keyExtractor={(reading) => reading.id}
@@ -134,6 +147,13 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
     gap: 10,
+  },
+  roomLabel: {
+    marginBottom: 4,
+    color: '#1E3A8A',
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 22,
   },
   readingCard: {
     minHeight: 70,

@@ -36,17 +36,22 @@ export function reminderTypeForDueDate(
 
 export function ownerReminderContent(
   roomName: string,
+  boardingHouseName: string | null,
   dueDate: string,
   today: string,
 ): OwnerReminderContent | null {
   const type = reminderTypeForDueDate(dueDate, today)
   if (!type) return null
 
+  const roomLabel = boardingHouseName
+    ? `${roomName || 'this room'} at ${boardingHouseName}`
+    : roomName || 'this room'
+
   if (type === 'owner_reading_due_soon') {
     return {
       type,
       title: 'Meter reading due soon',
-      message: `The bill for ${roomName} is due in 2 days. Enter the meter reading.`,
+      message: `The bill for ${roomLabel} is due in 2 days. Enter the meter reading.`,
     }
   }
 
@@ -55,8 +60,8 @@ export function ownerReminderContent(
     title: dueDate === today ? 'Meter reading due today' : 'Meter reading overdue',
     message:
       dueDate === today
-        ? `The bill for ${roomName} is due today. Enter the meter reading.`
-        : `The bill for ${roomName} was due on ${dueDate}. Enter the meter reading.`,
+        ? `The bill for ${roomLabel} is due today. Enter the meter reading.`
+        : `The bill for ${roomLabel} was due on ${dueDate}. Enter the meter reading.`,
   }
 }
 

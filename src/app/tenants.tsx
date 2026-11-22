@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 
 import { DashboardColors } from '@/constants/theme';
+import RoomLabel from '@/components/RoomLabel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { useRooms } from '@/contexts/RoomsContext';
@@ -271,16 +272,19 @@ export default function TenantsScreen() {
                   <Ionicons color={DashboardColors.primary} name="chevron-forward" size={20} />
                 )}
               </View>
-              <Text style={styles.roomName}>
-                {tenant.roomId
-                  ? (currentRoomNames.get(tenant.roomId) ?? tenant.roomName)
-                  : tenant.roomName}
-              </Text>
-              <Text style={styles.dateText}>
-                {tenant.boardingHouseId
-                  ? (currentHouseNames.get(tenant.boardingHouseId) ?? tenant.boardingHouseName)
-                  : tenant.boardingHouseName}
-              </Text>
+              <RoomLabel
+                boardingHouseName={
+                  tenant.boardingHouseId
+                    ? (currentHouseNames.get(tenant.boardingHouseId) ?? tenant.boardingHouseName)
+                    : tenant.boardingHouseName
+                }
+                roomName={
+                  tenant.roomId
+                    ? (currentRoomNames.get(tenant.roomId) ?? tenant.roomName)
+                    : tenant.roomName
+                }
+                style={styles.roomName}
+              />
               <Text style={styles.dateText}>
                 {status === 'scheduled' ? 'Move-in: ' : 'Moved in: '}{formatDate(tenant.moveInDate)}
               </Text>

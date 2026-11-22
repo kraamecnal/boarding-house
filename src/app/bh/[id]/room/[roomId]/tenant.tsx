@@ -18,6 +18,8 @@ import {
 
 import AnimatedButton from '@/components/AnimatedButton';
 import ImageField from '@/components/ImageField';
+import RoomLabel, { formatRoomLabel } from '@/components/RoomLabel';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { addOneMonth, useRooms } from '@/contexts/RoomsContext';
 import { CHARGES, isChargeType, type ChargeType } from '@/data/charges';
@@ -61,9 +63,11 @@ export default function RegisterTenantScreen() {
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const router = useRouter();
   const { getRoomById, assignTenant, isLoading: isLoadingRooms, loadError: roomsError } = useRooms();
+  const { getHouseById } = useBoardingHouses();
   const { session } = useAuth();
   const ownerId = session?.user.id;
   const room = roomId ? getRoomById(roomId) : undefined;
+  const houseName = room ? getHouseById(room.boardingHouseId)?.name : undefined;
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -161,7 +165,9 @@ export default function RegisterTenantScreen() {
   if (room.status === 'occupied') {
     return (
       <View style={styles.centered}>
-        <Text style={styles.centeredText}>{room.roomName} already has a tenant.</Text>
+        <Text style={styles.centeredText}>
+          {formatRoomLabel(room.roomName, houseName)} already has a tenant.
+        </Text>
       </View>
     );
   }
@@ -258,7 +264,11 @@ export default function RegisterTenantScreen() {
     >
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.roomBanner}>
-          <Text style={styles.roomBannerName}>{room.roomName}</Text>
+          <RoomLabel
+            boardingHouseName={houseName}
+            roomName={room.roomName}
+            style={styles.roomBannerName}
+          />
           <Text style={styles.roomBannerRate}>{formatPeso(room.monthlyRate)} / month</Text>
         </View>
 
@@ -521,6 +531,7 @@ const styles = StyleSheet.create({
     color: '#1E3A8A',
     fontSize: 18,
     fontWeight: '700',
+    lineHeight: 23,
   },
   roomBannerRate: {
     color: '#2563EB',

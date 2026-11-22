@@ -11,20 +11,34 @@ type RoomRelation = {
   room_id: string
   room_name: string
   boarding_house_id: string
-  boarding_house: { owner_id: string } | Array<{ owner_id: string }> | null
+  boarding_house:
+    | { owner_id: string; name: string | null }
+    | Array<{ owner_id: string; name: string | null }>
+    | null
 } | Array<{
   room_id: string
   room_name: string
   boarding_house_id: string
-  boarding_house: { owner_id: string } | Array<{ owner_id: string }> | null
+  boarding_house:
+    | { owner_id: string; name: string | null }
+    | Array<{ owner_id: string; name: string | null }>
+    | null
 }> | null
 
 type TenancyRelation = {
   owner_id: string
   rooms: RoomRelation
+  tenant_archive:
+    | { room_name: string | null; boarding_house_name: string | null }
+    | Array<{ room_name: string | null; boarding_house_name: string | null }>
+    | null
 } | Array<{
   owner_id: string
   rooms: RoomRelation
+  tenant_archive:
+    | { room_name: string | null; boarding_house_name: string | null }
+    | Array<{ room_name: string | null; boarding_house_name: string | null }>
+    | null
 }> | null
 
 type BillRow = {
@@ -137,7 +151,7 @@ Deno.serve(async (request: Request) => {
   const { data, error } = await supabase
     .from('monthly_bill')
     .select(
-      'bill_id, period_start, due_date, tenancy!inner(owner_id, rooms!inner(room_id, room_name, boarding_house_id, boarding_house!inner(owner_id)))',
+      'bill_id, period_start, due_date, tenancy!inner(owner_id, rooms(room_id, room_name, boarding_house_id, boarding_house(owner_id,name)), tenant_archive(room_name,boarding_house_name))',
     )
     .is('billed_at', null)
     .lte('due_date', twoDaysAhead)
@@ -155,14 +169,18 @@ Deno.serve(async (request: Request) => {
     const tenancy = firstRelation(bill.tenancy)
     const room = firstRelation(tenancy?.rooms)
     const boardingHouse = firstRelation(room?.boarding_house)
-    const content = ownerReminderContent(room?.room_name ?? 'this room', bill.due_date, today)
+    const archive = firstRelation(tenancy?.tenant_archive)
+    const content = ownerReminderContent(
+      room?.room_name ?? archive?.room_name ?? 'this room',
+      boardingHouse?.name ?? archive?.boarding_house_name ?? null,
+      bill.due_date,
+      today,
+    )
 
     if (
       !content ||
       !tenancy?.owner_id ||
-      !room ||
-      !boardingHouse ||
-      boardingHouse.owner_id !== tenancy.owner_id
+      (boardingHouse && boardingHouse.owner_id !== tenancy.owner_id)
     ) {
       skipped += 1
       continue
@@ -202,8 +220,8 @@ Deno.serve(async (request: Request) => {
           message: content.message,
           related_bill_id: bill.bill_id,
           data: {
-            room_id: room.room_id,
-            boarding_house_id: room.boarding_house_id,
+            room_id: room?.room_id ?? null,
+            boarding_house_id: room?.boarding_house_id ?? null,
             period: bill.period_start.slice(0, 7),
             reminder_type: content.type,
             reminder_day: today,

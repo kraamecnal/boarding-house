@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
 import type { DueItem } from '@/utils/dues';
+import RoomLabel, { formatRoomSentenceLabel } from '@/components/RoomLabel';
 
 type Props = {
   item: DueItem;
@@ -35,13 +36,15 @@ export default function DueRow({ item, houseName, onPress }: Props) {
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${room.roomName}, ${tenant.firstName} ${tenant.lastName}, ${dueText(daysUntilDue)}`}
+      accessibilityLabel={`${formatRoomSentenceLabel(room.roomName, houseName)}, ${tenant.firstName} ${tenant.lastName}, ${dueText(daysUntilDue)}`}
     >
       <View style={styles.header}>
         <View style={styles.titles}>
-          <Text style={styles.subtitle}>
-            {houseName} · {room.roomName}
-          </Text>
+          <RoomLabel
+            boardingHouseName={houseName}
+            roomName={room.roomName}
+            style={styles.subtitle}
+          />
           <Text style={styles.name}>
             {tenant.firstName} {tenant.lastName}
           </Text>
@@ -87,7 +90,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   titles: { flex: 1 },
-  subtitle: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
+  subtitle: { fontSize: 13, fontWeight: '600', lineHeight: 18, color: '#6B7280' },
   name: { fontSize: 17, fontWeight: '700', color: '#1A2B3C' },
   row: {
     flexDirection: 'row',

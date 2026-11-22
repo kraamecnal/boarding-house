@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { signedDocumentUrl } from '@/contexts/RoomsContext';
+import { formatRoomLabel } from '@/components/RoomLabel';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
 import { getSupabaseClient } from '@/utils/supabase';
 
@@ -218,8 +219,10 @@ export default function ArchivedTenantScreen() {
         {tab === 'info' ? (
           <>
             <View style={styles.card}>
-              <InfoRow label="Room" value={archive.room_name ?? '—'} />
-              <InfoRow label="Boarding house" value={archive.boarding_house_name ?? '—'} />
+              <InfoRow
+                label="Room"
+                value={formatRoomLabel(archive.room_name, archive.boarding_house_name) || '—'}
+              />
               <InfoRow label="Tenant" value={archive.tenant_name} />
               <InfoRow label="Email" value={archive.email_address || '—'} />
               <InfoRow label="Contact" value={archive.contact_number || '—'} />

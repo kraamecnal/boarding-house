@@ -1,6 +1,7 @@
 import type { BillStatus } from '@/contexts/BillsContext';
 import type { BillItem } from '@/contexts/BillsContext';
 import type { OccupiedRoom } from '@/contexts/RoomsContext';
+import { formatRoomLabel } from '@/components/RoomLabel';
 import { FIXED_COSTS_AMOUNT, FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
 
 const MONTHS_LONG = [
@@ -125,6 +126,7 @@ const center = (text: string) =>
 
 type BillTextInput = {
   room: OccupiedRoom;
+  boardingHouseName?: string;
   period: string;
   issuedDate: string;
   dueDate: string;
@@ -136,6 +138,7 @@ type BillTextInput = {
 
 export function buildBillText({
   room,
+  boardingHouseName,
   period,
   issuedDate,
   dueDate,
@@ -168,7 +171,7 @@ export function buildBillText({
     center('MONTHLY BILLING STATEMENT'),
     heavy,
     '',
-    field('Room No.:', room.roomName),
+    field('Room:', formatRoomLabel(room.roomName)),
     field('Tenant Name:', `${room.tenant.firstName} ${room.tenant.lastName}`),
     field('Contact:', room.tenant.contactNumber),
     field('Email:', room.tenant.email),

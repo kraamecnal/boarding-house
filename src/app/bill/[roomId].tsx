@@ -18,6 +18,7 @@ import BillStatement from '@/components/BillStatement';
 import PasswordPromptModal from '@/components/PasswordPromptModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBills, type BillStatus } from '@/contexts/BillsContext';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import {
   buildBillText,
@@ -58,9 +59,11 @@ export default function TenantBillScreen() {
     loadError: roomsError,
   } = useRooms();
   const { getBill, setStatus, isLoading: isLoadingBills, loadError, reload } = useBills();
+  const { getHouseById } = useBoardingHouses();
   const { hasPaymentPassword } = useAuth();
   const router = useRouter();
   const room = roomId ? getRoomById(roomId) : undefined;
+  const boardingHouseName = room ? getHouseById(room.boardingHouseId)?.name ?? '' : '';
   const [passwordPromptVisible, setPasswordPromptVisible] = useState(false);
 
   const minPeriod = room && isOccupied(room) ? room.tenant.startDate.slice(0, 7) : currentPeriod();
@@ -346,6 +349,7 @@ export default function TenantBillScreen() {
       await Share.share({
         message: buildBillText({
           room,
+          boardingHouseName,
           period: record.period,
           issuedDate: record.issuedDate,
           dueDate: record.dueDate,
@@ -492,6 +496,7 @@ export default function TenantBillScreen() {
 
         <BillStatement
           room={room}
+          boardingHouseName={boardingHouseName}
           record={record}
           meterContext={meterContext}
           meterContextLoading={isLoadingMeterContext}

@@ -16,6 +16,8 @@ import {
 } from 'react-native';
 
 import { useRooms } from '@/contexts/RoomsContext';
+import RoomLabel from '@/components/RoomLabel';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { formatShortDate, todayIso } from '@/utils/billing';
 import {
   dateFromLocalIso,
@@ -42,7 +44,9 @@ export default function AddMeterReadingScreen() {
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const router = useRouter();
   const { getRoomById, isLoading: isLoadingRooms, loadError: roomsError } = useRooms();
+  const { getHouseById } = useBoardingHouses();
   const room = roomId ? getRoomById(roomId) : undefined;
+  const houseName = room ? getHouseById(room.boardingHouseId)?.name : undefined;
 
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [isLoadingReadings, setIsLoadingReadings] = useState(true);
@@ -163,7 +167,11 @@ export default function AddMeterReadingScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag">
         <View style={styles.roomSummary}>
-          <Text style={styles.roomName}>{room.roomName}</Text>
+          <RoomLabel
+            boardingHouseName={houseName}
+            roomName={room.roomName}
+            style={styles.roomName}
+          />
           {isLoadingReadings ? (
             <ActivityIndicator color="#2563EB" />
           ) : loadError ? (
@@ -345,6 +353,7 @@ const styles = StyleSheet.create({
     color: '#1E3A8A',
     fontSize: 17,
     fontWeight: '700',
+    lineHeight: 22,
   },
   summaryLabel: {
     color: '#64748B',

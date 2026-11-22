@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AnimatedFAB from '@/components/AnimatedFAB';
 import RoomEditModal from '@/components/RoomEditModal';
+import { formatRoomSentenceLabel } from '@/components/RoomLabel';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { isOccupied, useRooms, type Room } from '@/contexts/RoomsContext';
 import { formatPeso } from '@/utils/billing';
@@ -258,7 +259,7 @@ export default function BoardingHouseScreen() {
                   onPress={() => handleCardPress(item)}
                   style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                   accessibilityRole="button"
-                  accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${item.roomName}` : `Open ${item.roomName}, currently vacant`}
+                  accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${formatRoomSentenceLabel(item.roomName, house.name)}` : `Open ${formatRoomSentenceLabel(item.roomName, house.name)}, currently vacant`}
                   accessibilityState={deleteMode ? { selected } : undefined}
                 >
                   <View style={styles.cardHeader}>
@@ -292,7 +293,7 @@ export default function BoardingHouseScreen() {
                 onPress={() => handleCardPress(item)}
                 style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
                 accessibilityRole="button"
-                accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${item.roomName}` : `Open ${item.roomName}, ${tenant.firstName} ${tenant.lastName}`}
+                accessibilityLabel={deleteMode ? `${selected ? 'Deselect' : 'Select'} ${formatRoomSentenceLabel(item.roomName, house.name)}` : `Open ${formatRoomSentenceLabel(item.roomName, house.name)}, ${tenant.firstName} ${tenant.lastName}`}
                 accessibilityState={deleteMode ? { selected } : undefined}
               >
                 <View style={styles.cardHeader}>

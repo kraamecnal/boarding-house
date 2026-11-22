@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -12,9 +12,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import DashboardDrawer from '@/components/DashboardDrawer';
+import RoomLabel from '@/components/RoomLabel';
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBills } from '@/contexts/BillsContext';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { useNotifications } from '@/contexts/NotificationsContext';
 import { useRooms } from '@/contexts/RoomsContext';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
@@ -31,12 +33,45 @@ export default function ManageScreen() {
     loadError: roomsError,
     reload: reloadRooms,
   } = useRooms();
+  const {
+    boardingHouses,
+    isLoading: isLoadingHouses,
+    loadError: housesError,
+    reload: reloadHouses,
+  } = useBoardingHouses();
   const { getBill, isLoading: isLoadingBills, loadError: billsError, reload: reloadBills } = useBills();
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
 
   const { upcoming, overdue } = useMemo(
     () => computeDues(rooms, getBill),
     [getBill, rooms],
+  );
+  const houseNames = useMemo(
+    () => new Map(boardingHouses.map((house) => [house.id, house.name])),
+    [boardingHouses],
+  );
+  const filterHouses = useMemo(
+    () => [...boardingHouses].sort((a, b) => a.name.localeCompare(b.name)),
+    [boardingHouses],
+  );
+  const filteredUpcoming = useMemo(
+    () =>
+      selectedHouseId
+        ? upcoming.filter((item) => item.room.boardingHouseId === selectedHouseId)
+        : upcoming,
+    [selectedHouseId, upcoming],
+  );
+  const selectedHouseName =
+    selectedHouseId === null ? null : houseNames.get(selectedHouseId) ?? 'this boarding house';
+
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setSelectedHouseId(null);
+      },
+      [],
+    ),
   );
   const metadata = session?.user.user_metadata ?? {};
   const metadataName = [metadata.full_name, metadata.name, metadata.display_name].find(
@@ -80,18 +115,19 @@ export default function ManageScreen() {
 
         <Text style={styles.greeting}>HELLO, {username}</Text>
 
-        {isLoadingBills || isLoadingRooms ? (
+        {isLoadingBills || isLoadingRooms || isLoadingHouses ? (
           <View style={styles.stateCard}>
             <ActivityIndicator color={DashboardColors.primary} size="large" />
           </View>
-        ) : billsError || roomsError ? (
+        ) : billsError || roomsError || housesError ? (
           <View style={styles.stateCard}>
             <Text accessibilityLiveRegion="polite" style={styles.emptyMessage}>
-              {roomsError ?? billsError}
+              {roomsError ?? housesError ?? billsError}
             </Text>
             <Pressable
               onPress={() => {
                 reloadRooms();
+                reloadHouses();
                 reloadBills();
               }}
               style={styles.retryButton}
@@ -101,10 +137,38 @@ export default function ManageScreen() {
           </View>
         ) : (
           <>
+            {filterHouses.length >= 3 && (
+              <View style={styles.houseFiltersSection}>
+                <ScrollView
+                  accessibilityLabel="Filter upcoming bills by boarding house"
+                  contentContainerStyle={styles.houseFilters}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}>
+                  <HouseFilterChip
+                    label="All"
+                    selected={selectedHouseId === null}
+                    onPress={() => setSelectedHouseId(null)}
+                  />
+                  {filterHouses.map((house) => (
+                    <HouseFilterChip
+                      key={house.id}
+                      label={house.name}
+                      selected={selectedHouseId === house.id}
+                      onPress={() => setSelectedHouseId(house.id)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             <DashboardSection
               title="Upcoming monthly due dates"
-              items={upcoming}
-              emptyMessage="No upcoming due dates yet."
+              items={filteredUpcoming}
+              emptyMessage={
+                selectedHouseName
+                  ? `No upcoming bills for ${selectedHouseName}.`
+                  : 'No upcoming due dates yet.'
+              }
+              houseNames={houseNames}
               onItemPress={(item) =>
                 router.push(`/bill/${item.room.id}?period=${item.period}`)
               }
@@ -113,6 +177,7 @@ export default function ManageScreen() {
               title="Unpaid tenants"
               items={overdue}
               emptyMessage="No unpaid overdue bills."
+              houseNames={houseNames}
               onItemPress={(item) =>
                 router.push(`/bill/${item.room.id}?period=${item.period}`)
               }
@@ -130,11 +195,13 @@ function DashboardSection({
   title,
   items,
   emptyMessage,
+  houseNames,
   onItemPress,
 }: {
   title: string;
   items: DueItem[];
   emptyMessage: string;
+  houseNames: Map<string, string>;
   onItemPress: (item: DueItem) => void;
 }) {
   return (
@@ -156,8 +223,13 @@ function DashboardSection({
                 <Text numberOfLines={1} style={styles.tenantName}>
                   {item.room.tenant.firstName} {item.room.tenant.lastName}
                 </Text>
+                <RoomLabel
+                  boardingHouseName={houseNames.get(item.room.boardingHouseId)}
+                  roomName={item.room.roomName}
+                  style={styles.roomLabel}
+                />
                 <Text style={styles.dueDetail}>
-                  {item.room.roomName} · {periodLabel(item.period)} · {formatShortDate(item.dueDate)}
+                  {periodLabel(item.period)} · {formatShortDate(item.dueDate)}
                 </Text>
               </View>
               <Text style={styles.amount}>{formatPeso(item.total)}</Text>
@@ -166,6 +238,28 @@ function DashboardSection({
         )}
       </View>
     </View>
+  );
+}
+
+function HouseFilterChip({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.houseFilterChip, selected && styles.houseFilterChipSelected]}>
+      <Text style={[styles.houseFilterLabel, selected && styles.houseFilterLabelSelected]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -216,6 +310,39 @@ const styles = StyleSheet.create({
     fontSize: 23,
     fontWeight: '800',
     fontStyle: 'italic',
+  },
+  houseFiltersSection: {
+    marginBottom: -12,
+  },
+  houseFilters: {
+    alignItems: 'center',
+    gap: 8,
+    paddingRight: 20,
+  },
+  houseFilterChip: {
+    maxWidth: 240,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 20,
+    backgroundColor: DashboardColors.white,
+  },
+  houseFilterChipSelected: {
+    borderColor: '#2563EB',
+    backgroundColor: '#2563EB',
+  },
+  houseFilterLabel: {
+    color: DashboardColors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  houseFilterLabelSelected: {
+    color: DashboardColors.white,
   },
   section: {
     gap: 8,
@@ -268,9 +395,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   dueItem: {
-    minHeight: 42,
+    minHeight: 54,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 8,
     paddingHorizontal: 8,
@@ -288,11 +415,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  roomLabel: {
+    color: '#64748B',
+    fontSize: 12,
+    lineHeight: 17,
+  },
   dueDetail: {
     color: DashboardColors.neutral,
     fontSize: 11,
   },
   amount: {
+    flexShrink: 0,
     color: DashboardColors.dark,
     fontSize: 13,
     fontWeight: '700',

@@ -16,7 +16,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AnimatedButton from '@/components/AnimatedButton';
 import ImageField from '@/components/ImageField';
+import RoomLabel, { formatRoomLabel } from '@/components/RoomLabel';
 import { useBills } from '@/contexts/BillsContext';
+import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
 import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
 import { formatPeso, formatShortDate, periodLabel, todayIso } from '@/utils/billing';
@@ -41,6 +43,7 @@ export default function RoomDetailScreen() {
     replaceTenantDocument,
     archiveTenant,
   } = useRooms();
+  const { getHouseById } = useBoardingHouses();
   const {
     getPaidBills,
     records,
@@ -50,6 +53,7 @@ export default function RoomDetailScreen() {
     getLatestBillDueDate,
   } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
+  const houseName = room ? getHouseById(room.boardingHouseId)?.name : undefined;
 
   const [tab, setTab] = useState<RoomTab>('info');
   const [viewerUri, setViewerUri] = useState<string | null>(null);
@@ -490,6 +494,11 @@ export default function RoomDetailScreen() {
             >
               <View style={styles.historyCopy}>
                 <Text style={styles.historyTitle}>{periodLabel(bill.period)} bill</Text>
+                <RoomLabel
+                  boardingHouseName={houseName}
+                  roomName={room.roomName}
+                  style={styles.historyRoomLabel}
+                />
                 <Text style={styles.historyDetail}>Paid on {formatShortDate(bill.paidDate)}</Text>
               </View>
               <Text style={styles.historyAmount}>{formatPeso(bill.snapshot.total)}</Text>
@@ -980,6 +989,11 @@ const styles = StyleSheet.create({
     color: '#1A2B3C',
     fontSize: 16,
     fontWeight: '700',
+  },
+  historyRoomLabel: {
+    color: '#64748B',
+    fontSize: 13,
+    lineHeight: 18,
   },
   historyDetail: {
     color: '#067647',

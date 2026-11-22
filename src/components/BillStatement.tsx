@@ -13,6 +13,7 @@ import {
 
 import type { BillRecord, BillStatus } from '@/contexts/BillsContext';
 import type { OccupiedRoom } from '@/contexts/RoomsContext';
+import { formatRoomLabel } from '@/components/RoomLabel';
 import { FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
 import {
   computeTotals,
@@ -27,6 +28,7 @@ import { dateFromLocalIso, isValidIsoDate, toLocalIsoDate } from '@/utils/meterR
 type Props = {
   room: OccupiedRoom;
   record: BillRecord;
+  boardingHouseName: string;
   meterContext: BillMeterContext | null;
   meterContextLoading: boolean;
   meterContextError: string | null;
@@ -49,6 +51,7 @@ type Props = {
 export default function BillStatement({
   room,
   record,
+  boardingHouseName,
   meterContext,
   meterContextLoading,
   meterContextError,
@@ -120,7 +123,7 @@ export default function BillStatement({
       <DoubleRule />
 
       <View style={styles.block}>
-        <Field label="Room No." value={room.roomName} />
+        <Field label="Room" value={formatRoomLabel(room.roomName)} />
         <Field label="Tenant Name" value={`${room.tenant.firstName} ${room.tenant.lastName}`} />
         <Field label="Contact" value={room.tenant.contactNumber} />
         <Field label="Email" value={room.tenant.email} />

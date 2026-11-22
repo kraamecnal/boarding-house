@@ -34,18 +34,37 @@ Deno.test('owner reminders use two days before and due or overdue dates', () => 
   }
 })
 
-Deno.test('owner reminders contain no bill amount', () => {
-  const dueToday = ownerReminderContent('Room 3', '2026-11-10', '2026-11-10')
-  const dueSoon = ownerReminderContent('Room 3', '2026-11-12', '2026-11-10')
-  const overdue = ownerReminderContent('Room 3', '2026-11-08', '2026-11-10')
+Deno.test('owner reminders identify the room and house without a bill amount', () => {
+  const dueToday = ownerReminderContent('A1', 'Bg1', '2026-11-10', '2026-11-10')
+  const dueSoon = ownerReminderContent('A1', 'Bg1', '2026-11-12', '2026-11-10')
+  const overdue = ownerReminderContent('A1', 'Bg1', '2026-11-08', '2026-11-10')
 
   for (const reminder of [dueToday, dueSoon, overdue]) {
     if (!reminder || /\bPHP\b|\u20b1/.test(`${reminder.title} ${reminder.message}`)) {
       throw new Error('Owner reminders must not include a bill amount.')
     }
   }
+  if (dueSoon?.message !== 'The bill for A1 at Bg1 is due in 2 days. Enter the meter reading.') {
+    throw new Error('Due-soon reminders must include the room and boarding house.')
+  }
+  if (dueToday?.message !== 'The bill for A1 at Bg1 is due today. Enter the meter reading.') {
+    throw new Error('Due-today reminders must include the room and boarding house.')
+  }
+  if (
+    overdue?.message !==
+    'The bill for A1 at Bg1 was due on 2026-11-08. Enter the meter reading.'
+  ) {
+    throw new Error('Overdue reminders must include the room and boarding house.')
+  }
   if (!overdue?.message.includes('Enter the meter reading')) {
     throw new Error('Overdue owner reminders must prompt for a meter reading.')
+  }
+})
+
+Deno.test('owner reminders fall back safely without a boarding house name', () => {
+  const reminder = ownerReminderContent('A1', null, '2026-11-10', '2026-11-10')
+  if (reminder?.message !== 'The bill for A1 is due today. Enter the meter reading.') {
+    throw new Error('Missing house names must preserve a valid room-only reminder.')
   }
 })
 
