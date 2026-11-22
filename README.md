@@ -97,19 +97,23 @@ select vault.create_secret('<random-secret>', 'notifications_webhook_secret');
 
 The database queues push requests asynchronously through `pg_net`, so a push-service outage does not roll back a bill, tenancy, or notification.
 
-### Tenant email reminders
+### Bill reminders and tenant delivery
 
-The existing `send-bill-reminders-daily` cron job invokes the server-only `send-bill-reminders` Edge Function. Apply the `bill_reminder_delivery_tracking` migration before deploying the function. The migration adds delivery/attempt state to the existing `bill_reminders` table and updates that same cron job to run hourly; the function only processes unpaid bills due today or in two days (Manila time), so hourly runs provide same-day retry opportunities without creating another schedule. A unique bill/type key and an atomic claim prevent concurrent duplicate sends. Successful Brevo acceptance is recorded as `sent`; rejected requests remain failed, and requests whose outcome is ambiguous are marked `uncertain` and are not automatically resent.
+`send-bill-reminders-daily` runs `send-bill-reminders` at 8:00 AM Asia/Manila (`0 0 * * *` in pg_cron UTC). It sends only owner in-app/Expo push reminders for bills that are not finalized: one at two days before the due date and one per day on or after the due date. Owner reminders do not include amounts.
 
-Push the migration, then set the following Edge Function secrets in the target Supabase project. Do not put their values in app code or commit them:
+Saving an electricity reading recalculates a bill but does not finalize it or email the tenant. The authenticated `finalize-tenant-bill` function performs explicit finalization and sends the itemized final bill. `resend-tenant-bill` resends an already-finalized bill without changing `billed_at`. Brevo sends can resolve as `sent`, `failed`, or `uncertain`; an uncertain timeout/5xx/network outcome is never automatically resent.
+
+The `split_bill_reminder_delivery` migration adds the owner/tenant reminder types, per-day owner uniqueness, one-per-bill tenant uniqueness, delivery status, attempts, retry state, and Brevo message IDs. It also creates a pre-migration copy at `private.bill_reminders_backup_20261121`.
+
+Set the following Edge Function secrets in the target Supabase project. Do not put their values in app code or commit them:
 
 ```sh
 npx supabase db push --project-ref <project-ref>
 npx supabase secrets set BREVO_API_KEY=<brevo-api-key> BREVO_SENDER_EMAIL=<verified-sender-email> --project-ref <project-ref>
-npx supabase functions deploy send-bill-reminders --project-ref <project-ref>
+npx supabase functions deploy send-bill-reminders finalize-tenant-bill resend-tenant-bill --project-ref <project-ref>
 ```
 
-Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to the server runtime. The function requires a verified service-role JWT, accepts no bill ID from callers, and must remain configured with `verify_jwt = true`. The cron job uses its existing server-side service-role authorization. For local checks, run `deno test supabase/functions/send-bill-reminders/reminder-logic_test.ts`; do not test delivery by calling the live function with real tenant bills. Use a developer-approved controlled recipient for any end-to-end email test.
+Supabase provides `SUPABASE_URL`; the deployed functions also use the existing server-side `SERVER_API_SECRET`, `BILL_REMINDERS_CRON_TOKEN`, `BREVO_API_KEY`, and `BREVO_SENDER_EMAIL` secrets. Finalize and resend require a signed-in owner JWT. Run the pure checks with `deno test supabase/functions/send-bill-reminders/reminder-logic_test.ts supabase/functions/_shared/bill-email_test.ts`; use a controlled recipient for end-to-end email tests, never a real tenant.
 
 ### Notification checks
 
@@ -117,10 +121,10 @@ After applying the migration and configuring push:
 
 1. Sign in as an owner and open Manage. Confirm the bell opens the list, shows an empty state when appropriate, and asks for push permission only after choosing **Enable push alerts**.
 2. Register a tenant, generate a bill, add its electricity reading, and mark the bill paid. Confirm the corresponding tenant, bill, reading-required, electricity-charge, and paid notifications appear without refreshing.
-3. Use a bill due in two days and another due today to check the scheduled reminders. Run `select private.create_bill_due_notifications();` twice in the SQL editor and confirm each bill has only one reminder of each type.
+3. Use an unfinalized bill due in two days and another due today to check the 8:00 AM owner reminders. Confirm no amount is present and duplicate runs create no second reminder for the same Manila day. Finalized bills must not receive owner reminders.
 4. Mark one notification read and then mark all read. Confirm the unread badge and read styling update immediately and remain correct after reopening Manage.
 5. Sign in as a second owner and attempt to query/update the first owner's notification ID; RLS must return no row and prevent changes.
-6. Retry the reminder function and repeat event-producing actions where safe. Confirm the `(owner_id, event_key)` uniqueness prevents duplicates.
+6. Save a meter reading and confirm it recalculates without finalizing or emailing. Then use **Finalize & send** with a controlled recipient. Confirm the bill is finalized once, can be resent manually, and a tenant without email returns the no-email result.
 7. Disable or invalidate a device push token and verify in-app notification creation still succeeds. Check Edge Function logs for delivery errors; push failures must not interrupt the primary workflow.
 
 ## Get a fresh project

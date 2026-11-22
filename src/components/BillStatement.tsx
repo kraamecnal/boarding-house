@@ -504,24 +504,6 @@ export default function BillStatement({
                       )}
                   </>
                 )}
-                {!record.isFinalized &&
-                  record.status !== 'paid' &&
-                  meterContext?.saved &&
-                  meterContext.currentReading && (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: isSavingMeterReading }}
-                      disabled={isSavingMeterReading}
-                      onPress={onSaveMeterReading}
-                      style={[
-                        styles.meterButton,
-                        isSavingMeterReading && styles.meterButtonDisabled,
-                      ]}>
-                      <Text style={styles.meterButtonLabel}>
-                        {isSavingMeterReading ? 'Issuing…' : 'Issue bill'}
-                      </Text>
-                    </Pressable>
-                  )}
               </>
             ) : !record.billId ? (
               <Text style={styles.electricityMessage}>No electricity charge.</Text>

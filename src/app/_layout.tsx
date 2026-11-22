@@ -53,10 +53,15 @@ function AppNavigator() {
     );
   }
 
-  // Mandatory setup: fixed charges + payment password must exist before the app opens.
+  // Mandatory setup: billing charges + payment password must exist before the app opens.
   const isSetupComplete = hasAllCharges && hasPaymentPassword;
-  if (session && !isSetupComplete && pathname !== '/setup' && !pathname.startsWith('/auth/')) {
-    return <Redirect href="/setup" />;
+  if (
+    session &&
+    !isSetupComplete &&
+    pathname !== '/billing-charges' &&
+    !pathname.startsWith('/auth/')
+  ) {
+    return <Redirect href="/billing-charges" />;
   }
 
   if (session && pathname === '/sign-in') {
@@ -79,7 +84,6 @@ function AppNavigator() {
         <Stack.Screen name="auth/recover-payment-password" options={{ title: 'Forgot password?' }} />
         <Stack.Screen name="billing-charges" options={{ title: 'Billing charges' }} />
         <Stack.Screen name="profile" options={{ title: 'Profile' }} />
-        <Stack.Screen name="setup" options={{ title: 'Fixed charges' }} />
         <Stack.Screen name="tenants" options={{ title: 'Tenants' }} />
         <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
         <Stack.Screen

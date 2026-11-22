@@ -98,6 +98,12 @@ verify_jwt = false
 [functions.send-bill-reminders]
 verify_jwt = false
 
+[functions.finalize-tenant-bill]
+verify_jwt = true
+
+[functions.resend-tenant-bill]
+verify_jwt = true
+
 [studio]
 enabled = true
 # Port to use for Supabase Studio.

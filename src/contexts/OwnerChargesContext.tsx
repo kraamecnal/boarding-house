@@ -8,7 +8,7 @@ export type OwnerCharges = Partial<Record<ChargeType, number>>;
 export type OwnerChargeInput = Record<ChargeType, number>;
 
 type ContextValue = {
-  /** The owner's saved fixed charges (water, wifi, trash, electricity rate). */
+  /** The owner's saved billing charges (water, wifi, trash, electricity rate). */
   charges: OwnerCharges;
   isLoading: boolean;
   loadError: string | null;
@@ -58,7 +58,7 @@ export function OwnerChargesProvider({ children }: { children: ReactNode }) {
         if (isCurrent) {
           setCharges({});
           setLoadError(
-            error instanceof Error ? error.message : 'Could not load your fixed charges.',
+            error instanceof Error ? error.message : 'Could not load your billing charges.',
           );
         }
       } finally {

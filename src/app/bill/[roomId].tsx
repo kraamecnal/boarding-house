@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -35,6 +35,12 @@ import {
   saveBillMeterReading,
   type BillMeterContext,
 } from '@/utils/meterBilling';
+import {
+  billDeliveryMessage,
+  finalizeAndSendBill,
+  resendFinalBill,
+  type BillDeliveryResult,
+} from '@/utils/billDelivery';
 import {
   isValidIsoDate,
   parseMeterReadingInput,
@@ -77,6 +83,10 @@ export default function TenantBillScreen() {
   const [lateReadingDate, setLateReadingDate] = useState<string | null>(null);
   const [isCarryingForward, setIsCarryingForward] = useState(false);
   const [isCancellingCarryForward, setIsCancellingCarryForward] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [deliveryResult, setDeliveryResult] = useState<BillDeliveryResult | null>(null);
+  const deliveryInFlight = useRef(false);
 
   useEffect(() => {
     let isCurrent = true;
@@ -350,6 +360,87 @@ export default function TenantBillScreen() {
     }
   };
 
+  const handleFinalizeDelivery = async () => {
+    if (!record.billId || deliveryInFlight.current) return;
+    deliveryInFlight.current = true;
+    setIsFinalizing(true);
+    setDeliveryResult(null);
+    try {
+      const result = await finalizeAndSendBill(record.billId);
+      setDeliveryResult(result);
+      reload();
+      Alert.alert('Bill finalized', billDeliveryMessage(result));
+    } catch (error: unknown) {
+      Alert.alert(
+        'Could not finalize bill',
+        error instanceof Error ? error.message : 'Please review the bill and try again.',
+      );
+    } finally {
+      deliveryInFlight.current = false;
+      setIsFinalizing(false);
+    }
+  };
+
+  const confirmFinalizeDelivery = () => {
+    if (!record.billId || record.isFinalized) return;
+    const recipient = room.tenant.email.trim() || 'No email on file';
+    Alert.alert(
+      'Finalize & send this bill?',
+      `Recipient: ${recipient}\nTotal: PHP ${record.totalAmount.toFixed(2)}\n\nAfter finalization, bill items cannot be changed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Finalize & Send',
+          onPress: () => void handleFinalizeDelivery(),
+        },
+      ],
+    );
+  };
+
+  const handleResend = async () => {
+    if (!record.billId || deliveryInFlight.current) return;
+    deliveryInFlight.current = true;
+    setIsResending(true);
+    setDeliveryResult(null);
+    try {
+      const result = await resendFinalBill(record.billId);
+      setDeliveryResult(result);
+      Alert.alert('Bill resend result', billDeliveryMessage(result));
+    } catch (error: unknown) {
+      Alert.alert(
+        'Could not resend bill',
+        error instanceof Error ? error.message : 'Please try again.',
+      );
+    } finally {
+      deliveryInFlight.current = false;
+      setIsResending(false);
+    }
+  };
+
+  const confirmResend = () => {
+    if (!record.billId || !record.isFinalized) return;
+    const recipient = room.tenant.email.trim() || 'No email on file';
+    Alert.alert(
+      'Resend final bill?',
+      `Recipient: ${recipient}\nTotal: PHP ${record.totalAmount.toFixed(2)}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Resend', onPress: () => void handleResend() },
+      ],
+    );
+  };
+
+  const hasElectricityCharge = record.items.some(
+    (item) =>
+      item.itemType === 'electricity' ||
+      (item.itemType === 'adjustment' && item.description === 'Electricity'),
+  );
+  const canFinalize =
+    Boolean(record.billId) &&
+    !record.isFinalized &&
+    record.status !== 'paid' &&
+    (hasElectricityCharge || Boolean(record.electricityRollForwardToBillId));
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -428,6 +519,55 @@ export default function TenantBillScreen() {
           onChangeStatus={handleChangeStatus}
         />
 
+        {!record.isFinalized && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canFinalize || isFinalizing }}
+            disabled={!canFinalize || isFinalizing}
+            onPress={confirmFinalizeDelivery}
+            style={[
+              styles.primaryDeliveryButton,
+              (!canFinalize || isFinalizing) && styles.deliveryButtonDisabled,
+            ]}>
+            <Ionicons name="mail-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.primaryDeliveryLabel}>
+              {isFinalizing ? 'Finalizing…' : 'Finalize & send'}
+            </Text>
+          </Pressable>
+        )}
+
+        {record.isFinalized && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isResending }}
+            disabled={isResending}
+            onPress={confirmResend}
+            style={[
+              styles.secondaryDeliveryButton,
+              isResending && styles.deliveryButtonDisabled,
+            ]}>
+            <Ionicons name="refresh-outline" size={18} color="#1E3A8A" />
+            <Text style={styles.secondaryDeliveryLabel}>
+              {isResending ? 'Resending…' : 'Resend final bill'}
+            </Text>
+          </Pressable>
+        )}
+
+        {deliveryResult && (
+          <View
+            accessibilityLiveRegion="polite"
+            style={[
+              styles.deliveryNotice,
+              deliveryResult.kind === 'sent'
+                ? styles.deliveryNoticeSuccess
+                : styles.deliveryNoticeWarning,
+            ]}>
+            <Text style={styles.deliveryNoticeText}>
+              {billDeliveryMessage(deliveryResult)}
+            </Text>
+          </View>
+        )}
+
         <Pressable style={styles.shareButton} onPress={handleShare}>
           <Ionicons name="share-outline" size={18} color="#007AFF" />
           <Text style={styles.shareText}>Share bill</Text>
@@ -502,5 +642,61 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 15,
     fontWeight: '500',
+  },
+  primaryDeliveryButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+    shadowColor: '#1E3A8A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  primaryDeliveryLabel: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  secondaryDeliveryButton: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#EFF6FF',
+  },
+  secondaryDeliveryLabel: {
+    color: '#1E3A8A',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  deliveryButtonDisabled: {
+    opacity: 0.55,
+  },
+  deliveryNotice: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  deliveryNoticeSuccess: {
+    borderColor: '#93C5FD',
+    backgroundColor: '#DBEAFE',
+  },
+  deliveryNoticeWarning: {
+    borderColor: '#D1D5DB',
+    backgroundColor: '#FFFFFF',
+  },
+  deliveryNoticeText: {
+    color: '#1E293B',
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

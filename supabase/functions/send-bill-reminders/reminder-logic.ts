@@ -1,4 +1,12 @@
-export type ReminderType = 'two_days_before' | 'on_due_date'
+export type ReminderType =
+  | 'owner_reading_due_soon'
+  | 'owner_reading_due'
+
+export type OwnerReminderContent = {
+  type: ReminderType
+  title: string
+  message: string
+}
 
 export function manilaDate(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -21,22 +29,35 @@ export function reminderTypeForDueDate(
   dueDate: string,
   today: string,
 ): ReminderType | null {
-  if (dueDate === today) return 'on_due_date'
-  if (dueDate === addDays(today, 2)) return 'two_days_before'
+  if (dueDate === addDays(today, 2)) return 'owner_reading_due_soon'
+  if (dueDate <= today) return 'owner_reading_due'
   return null
 }
 
-export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => {
-    const entities: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
+export function ownerReminderContent(
+  roomName: string,
+  dueDate: string,
+  today: string,
+): OwnerReminderContent | null {
+  const type = reminderTypeForDueDate(dueDate, today)
+  if (!type) return null
+
+  if (type === 'owner_reading_due_soon') {
+    return {
+      type,
+      title: 'Meter reading due soon',
+      message: `The bill for ${roomName} is due in 2 days. Enter the meter reading.`,
     }
-    return entities[character]
-  })
+  }
+
+  return {
+    type,
+    title: dueDate === today ? 'Meter reading due today' : 'Meter reading overdue',
+    message:
+      dueDate === today
+        ? `The bill for ${roomName} is due today. Enter the meter reading.`
+        : `The bill for ${roomName} was due on ${dueDate}. Enter the meter reading.`,
+  }
 }
 
 export function secretMatches(provided: string | null, expected: string | null): boolean {

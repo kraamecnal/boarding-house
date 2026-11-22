@@ -1,7 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Stack, useRouter } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,96 +12,44 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
-import { CHARGES, isChargeType, type ChargeType } from '@/data/charges';
-import { getSupabaseClient } from '@/utils/supabase';
+import { useOwnerCharges, type OwnerChargeInput } from '@/contexts/OwnerChargesContext';
+import { CHARGES, type ChargeType } from '@/data/charges';
 
 type ChargeValues = Record<ChargeType, string>;
 type ChargeErrors = Partial<Record<ChargeType, string>>;
 
-const EMPTY_VALUES: ChargeValues = {
-  water: '',
-  wifi: '',
-  trash: '',
-  electricity: '',
-};
-
 const DECIMAL_AMOUNT = /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/;
+const MIN_PASSWORD_LENGTH = 8;
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
 export default function BillingChargesScreen() {
-  const { session } = useAuth();
-  const ownerId = session?.user.id;
-  const [values, setValues] = useState<ChargeValues>(EMPTY_VALUES);
+  const router = useRouter();
+  const { hasPaymentPassword, setPaymentPassword, signOut } = useAuth();
+  const { charges, hasAllCharges, saveCharges } = useOwnerCharges();
+  const needsSetup = !hasAllCharges || !hasPaymentPassword;
+  const [values, setValues] = useState<ChargeValues>(() => ({
+    water: charges.water === undefined ? '' : String(charges.water),
+    wifi: charges.wifi === undefined ? '' : String(charges.wifi),
+    trash: charges.trash === undefined ? '' : String(charges.trash),
+    electricity: charges.electricity === undefined ? '' : String(charges.electricity),
+  }));
   const [fieldErrors, setFieldErrors] = useState<ChargeErrors>({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  const [savedValueCount, setSavedValueCount] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const saveInProgress = useRef(false);
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    const loadCharges = async () => {
-      setIsLoading(true);
-      setLoadError(null);
-      setSaveError(null);
-      setSaveSuccess(false);
-
-      if (!ownerId) {
-        setLoadError('Your signed-in owner account could not be identified. Please sign in again.');
-        setIsLoading(false);
-        return;
-      }
-
-      try {
-        const { data, error } = await getSupabaseClient()
-          .from('owner_default_charges')
-          .select('item_type, unit_price')
-          .eq('owner_id', ownerId);
-
-        if (error) throw error;
-
-        const nextValues = { ...EMPTY_VALUES };
-        let savedCount = 0;
-
-        for (const row of data ?? []) {
-          if (!isChargeType(row.item_type)) continue;
-          if (row.unit_price === null || row.unit_price === undefined) {
-            throw new Error(`The saved ${row.item_type} charge has no price.`);
-          }
-
-          nextValues[row.item_type] = String(row.unit_price);
-          savedCount += 1;
-        }
-
-        if (!isCurrent) return;
-        setValues(nextValues);
-        setFieldErrors({});
-        setSavedValueCount(savedCount);
-      } catch (error: unknown) {
-        if (!isCurrent) return;
-        setLoadError(getErrorMessage(error, 'Could not load your saved charges. Please try again.'));
-      } finally {
-        if (isCurrent) setIsLoading(false);
-      }
-    };
-
-    void loadCharges();
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [loadAttempt, ownerId]);
+  const savedValueCount = CHARGES.filter(({ key }) => charges[key] !== undefined).length;
 
   const updateValue = useCallback((key: ChargeType, value: string) => {
     setValues((current) => ({ ...current, [key]: value }));
@@ -108,7 +59,7 @@ export default function BillingChargesScreen() {
   }, []);
 
   const saveChanges = async () => {
-    if (saveInProgress.current || isLoading || !ownerId) return;
+    if (saveInProgress.current) return;
 
     setSaveError(null);
     setSaveSuccess(false);
@@ -128,21 +79,25 @@ export default function BillingChargesScreen() {
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
+    if (!hasPaymentPassword && password.length < MIN_PASSWORD_LENGTH) {
+      setSaveError(`Use at least ${MIN_PASSWORD_LENGTH} characters for the payment password.`);
+      return;
+    }
+    if (!hasPaymentPassword && password !== confirmPassword) {
+      setSaveError('The payment passwords do not match.');
+      return;
+    }
+
     saveInProgress.current = true;
     setIsSaving(true);
 
+    let chargesSaved = false;
     try {
-      const rows = CHARGES.map(({ key }) => ({
-        owner_id: ownerId,
-        item_type: key,
-        unit_price: values[key].trim(),
-      }));
-
-      const { error } = await getSupabaseClient()
-        .from('owner_default_charges')
-        .upsert(rows, { onConflict: 'owner_id,item_type' });
-
-      if (error) throw error;
+      const input = Object.fromEntries(
+        CHARGES.map(({ key }) => [key, Number(values[key].trim())]),
+      ) as OwnerChargeInput;
+      await saveCharges(input);
+      chargesSaved = true;
 
       setValues((current) => ({
         water: current.water.trim(),
@@ -150,57 +105,70 @@ export default function BillingChargesScreen() {
         trash: current.trash.trim(),
         electricity: current.electricity.trim(),
       }));
-      setSavedValueCount(CHARGES.length);
+      if (!hasPaymentPassword) await setPaymentPassword(password);
       setSaveSuccess(true);
+      if (needsSetup) router.replace('/(tabs)');
     } catch (error: unknown) {
-      setSaveError(getErrorMessage(error, 'Could not save your charges. Your values are still here.'));
+      const fallback = 'Could not save your changes. Your values are still here.';
+      const message = getErrorMessage(error, fallback);
+      setSaveError(
+        chargesSaved && !hasPaymentPassword
+          ? `Your billing charges were saved, but the payment password could not be set. ${message}`
+          : message,
+      );
     } finally {
       saveInProgress.current = false;
       setIsSaving(false);
     }
   };
 
-  return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}>
-      <View style={styles.intro}>
-        <View style={styles.introIcon}>
-          <Ionicons color={DashboardColors.primary} name="receipt-outline" size={24} />
-        </View>
-        <Text style={styles.description}>
-          Set the default charges shared across all of your boarding houses.
-        </Text>
-      </View>
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    try {
+      await signOut();
+    } catch (error: unknown) {
+      setSaveError(getErrorMessage(error, 'Unable to sign out. Please try again.'));
+      setIsSigningOut(false);
+    }
+  };
 
-      {isLoading ? (
-        <View accessibilityLiveRegion="polite" style={styles.stateCard}>
-          <ActivityIndicator color={DashboardColors.primary} size="large" />
-          <Text style={styles.stateText}>Loading your saved charges…</Text>
-        </View>
-      ) : loadError ? (
-        <View style={styles.stateCard}>
-          <Ionicons color="#B42318" name="alert-circle-outline" size={28} />
-          <Text accessibilityLiveRegion="polite" style={styles.errorText}>
-            {loadError}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setLoadAttempt((attempt) => attempt + 1)}
-            style={styles.retryButton}>
-            <Text style={styles.retryLabel}>Try again</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <>
+  return (
+    <SafeAreaView style={styles.safeArea} edges={needsSetup ? ['top', 'bottom'] : ['bottom']}>
+      <Stack.Screen
+        options={{
+          headerShown: !needsSetup,
+          gestureEnabled: !needsSetup,
+          title: 'Billing charges',
+        }}
+      />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.intro}>
+            <View style={styles.introIcon}>
+              <Ionicons color={DashboardColors.primary} name="receipt-outline" size={24} />
+            </View>
+            <View style={styles.introCopy}>
+              {needsSetup && <Text style={styles.setupTitle}>Billing charges</Text>}
+              <Text style={styles.description}>
+                {needsSetup
+                  ? 'Set your default billing charges and payment password to finish account setup.'
+                  : 'Set the default charges shared across all of your boarding houses.'}
+              </Text>
+            </View>
+          </View>
+
           {savedValueCount < CHARGES.length && (
             <View style={styles.setupNotice}>
               <Ionicons color={DashboardColors.primary} name="information-circle-outline" size={20} />
               <Text style={styles.setupText}>
                 {savedValueCount === 0
-                  ? 'No defaults are saved yet. Enter all four values to finish setup. A blank field is not treated as zero.'
-                  : 'Some defaults are not saved yet. Complete each blank field; a blank value is not treated as zero.'}
+                  ? 'Enter all four values to finish setup. A blank field is not treated as zero.'
+                  : 'Complete each blank field; a blank value is not treated as zero.'}
               </Text>
             </View>
           )}
@@ -227,39 +195,147 @@ export default function BillingChargesScreen() {
                 when valid meter readings are available.
               </Text>
             </View>
+          </View>
 
-            {saveError && (
-              <Text accessibilityLiveRegion="polite" style={styles.errorText}>
-                {saveError}
+          {!hasPaymentPassword && (
+            <View style={styles.formCard}>
+              <Text style={styles.sectionTitle}>Payment password</Text>
+              <Text style={styles.sectionDescription}>
+                Enter this password when marking a bill as paid. It is also your account password,
+                so keep it private.
+              </Text>
+              <PasswordInput
+                disabled={isSaving}
+                label="New password"
+                onChangeText={(text) => {
+                  setPassword(text);
+                  setSaveError(null);
+                }}
+                showPassword={showPassword}
+                onToggleShow={() => setShowPassword((shown) => !shown)}
+                placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
+                value={password}
+              />
+              <PasswordInput
+                disabled={isSaving}
+                label="Confirm password"
+                onChangeText={(text) => {
+                  setConfirmPassword(text);
+                  setSaveError(null);
+                }}
+                showPassword={showPassword}
+                onToggleShow={() => setShowPassword((shown) => !shown)}
+                showToggle={false}
+                value={confirmPassword}
+                onSubmitEditing={saveChanges}
+              />
+            </View>
+          )}
+
+          {saveError && (
+            <Text accessibilityLiveRegion="polite" style={styles.errorText}>
+              {saveError}
+            </Text>
+          )}
+          {saveSuccess && (
+            <Text accessibilityLiveRegion="polite" style={styles.successText}>
+              Your billing charges have been saved.
+            </Text>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={isSaving}
+            onPress={() => void saveChanges()}
+            style={({ pressed }) => [
+              styles.saveButton,
+              (pressed || isSaving) && styles.saveButtonPressed,
+            ]}>
+            {isSaving ? (
+              <View style={styles.savingContent}>
+                <ActivityIndicator color={DashboardColors.white} size="small" />
+                <Text style={styles.saveLabel}>Saving…</Text>
+              </View>
+            ) : (
+              <Text style={styles.saveLabel}>
+                {needsSetup ? 'Save and continue' : 'Save changes'}
               </Text>
             )}
-            {saveSuccess && (
-              <Text accessibilityLiveRegion="polite" style={styles.successText}>
-                Your default charges have been saved.
-              </Text>
-            )}
+          </Pressable>
 
+          {needsSetup && (
             <Pressable
               accessibilityRole="button"
-              disabled={isSaving}
-              onPress={() => void saveChanges()}
-              style={({ pressed }) => [
-                styles.saveButton,
-                (pressed || isSaving) && styles.saveButtonPressed,
-              ]}>
-              {isSaving ? (
-                <View style={styles.savingContent}>
-                  <ActivityIndicator color={DashboardColors.white} size="small" />
-                  <Text style={styles.saveLabel}>Saving…</Text>
-                </View>
-              ) : (
-                <Text style={styles.saveLabel}>Save changes</Text>
-              )}
+              disabled={isSigningOut || isSaving}
+              onPress={() => void handleSignOut()}
+              style={styles.signOutButton}>
+              <Text style={styles.signOutLabel}>
+                {isSigningOut ? 'Signing out…' : 'Sign out'}
+              </Text>
             </Pressable>
-          </View>
-        </>
-      )}
-    </ScrollView>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+function PasswordInput({
+  disabled,
+  label,
+  onChangeText,
+  onSubmitEditing,
+  onToggleShow,
+  placeholder,
+  showPassword,
+  showToggle = true,
+  value,
+}: {
+  disabled: boolean;
+  label: string;
+  onChangeText: (value: string) => void;
+  onSubmitEditing?: () => void;
+  onToggleShow: () => void;
+  placeholder?: string;
+  showPassword: boolean;
+  showToggle?: boolean;
+  value: string;
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.inputContainer}>
+        <TextInput
+          accessibilityLabel={label}
+          autoCapitalize="none"
+          autoComplete="new-password"
+          autoCorrect={false}
+          editable={!disabled}
+          onChangeText={onChangeText}
+          onSubmitEditing={onSubmitEditing}
+          placeholder={placeholder}
+          placeholderTextColor={DashboardColors.neutral}
+          returnKeyType={onSubmitEditing ? 'go' : 'next'}
+          secureTextEntry={!showPassword}
+          style={styles.input}
+          value={value}
+        />
+        {showToggle && (
+          <Pressable
+            accessibilityLabel={showPassword ? 'Hide passwords' : 'Show passwords'}
+            accessibilityRole="button"
+            onPress={onToggleShow}
+            hitSlop={8}
+            style={styles.eyeButton}>
+            <Ionicons
+              color={DashboardColors.neutral}
+              name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+            />
+          </Pressable>
+        )}
+      </View>
+    </View>
   );
 }
 
@@ -306,6 +382,10 @@ function ChargeInput({
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
   content: {
     flexGrow: 1,
     gap: 18,
@@ -318,6 +398,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  introCopy: {
+    flex: 1,
+    gap: 3,
+  },
   introIcon: {
     width: 48,
     height: 48,
@@ -327,25 +411,14 @@ const styles = StyleSheet.create({
     backgroundColor: DashboardColors.light,
   },
   description: {
-    flex: 1,
     color: DashboardColors.neutral,
     fontSize: 15,
     lineHeight: 22,
   },
-  stateCard: {
-    minHeight: 190,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 14,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: DashboardColors.light,
-    borderRadius: 18,
-    backgroundColor: DashboardColors.white,
-  },
-  stateText: {
-    color: DashboardColors.neutral,
-    fontSize: 15,
+  setupTitle: {
+    color: DashboardColors.text,
+    fontSize: 22,
+    fontWeight: '700',
   },
   setupNotice: {
     flexDirection: 'row',
@@ -373,6 +446,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 10,
     elevation: 2,
+  },
+  sectionTitle: {
+    color: DashboardColors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  sectionDescription: {
+    color: DashboardColors.neutral,
+    fontSize: 13,
+    lineHeight: 19,
   },
   field: {
     gap: 7,
@@ -451,18 +534,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  retryButton: {
-    minHeight: 42,
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    backgroundColor: DashboardColors.primary,
-  },
-  retryLabel: {
-    color: DashboardColors.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  eyeButton: { width: 42, height: 48, alignItems: 'center', justifyContent: 'center' },
   saveButton: {
     minHeight: 52,
     alignItems: 'center',
@@ -477,5 +549,15 @@ const styles = StyleSheet.create({
     color: DashboardColors.white,
     fontSize: 16,
     fontWeight: '700',
+  },
+  signOutButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  signOutLabel: {
+    color: DashboardColors.neutral,
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

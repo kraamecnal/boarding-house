@@ -1,161 +1,42 @@
-import {
-  createClient,
-  type SupabaseClient,
-} from 'supabase'
+import { createClient, type SupabaseClient } from 'supabase'
 import {
   addDays,
-  escapeHtml,
   manilaDate,
-  reminderTypeForDueDate,
+  ownerReminderContent,
   secretMatches,
   type ReminderType,
 } from './reminder-logic.ts'
 
-type ReminderStatus = 'sending' | 'sent' | 'failed' | 'uncertain'
-
-type Database = {
- public: {
-   Tables: {
-     bill_reminders: {
-       Row: {
-         reminder_id: string
-         bill_id: string
-         reminder_type: ReminderType
-         delivery_status: ReminderStatus
-         attempt_count: number
-         attempt_started_at: string | null
-         next_attempt_at: string | null
-         sent_at: string | null
-         last_error: string | null
-       }
-       Insert: {
-         reminder_id?: string
-         bill_id: string
-         reminder_type: ReminderType
-         delivery_status?: ReminderStatus
-         attempt_count?: number
-         attempt_started_at?: string | null
-         next_attempt_at?: string | null
-         sent_at?: string | null
-         last_error?: string | null
-       }
-       Update: Partial<Database['public']['Tables']['bill_reminders']['Insert']>
-       Relationships: [{
-         foreignKeyName: 'bill_reminders_bill_id_fkey'
-         columns: ['bill_id']
-         isOneToOne: false
-         referencedRelation: 'monthly_bill'
-         referencedColumns: ['bill_id']
-       }]
-     }
-     monthly_bill: {
-       Row: {
-         bill_id: string
-         tenancy_id: string
-         due_date: string
-         total_amount: number
-         is_paid: boolean | null
-         paid_at: string | null
-       }
-       Insert: {
-         bill_id?: string
-         tenancy_id: string
-         due_date: string
-         total_amount?: number
-         is_paid?: boolean | null
-         paid_at?: string | null
-       }
-       Update: Partial<Database['public']['Tables']['monthly_bill']['Insert']>
-       Relationships: [{
-         foreignKeyName: 'monthly_bill_tenancy_id_fkey'
-         columns: ['tenancy_id']
-         isOneToOne: false
-         referencedRelation: 'tenancy'
-         referencedColumns: ['tenancy_id']
-       }]
-     }
-     tenancy: {
-       Row: {
-         tenancy_id: string
-         tenant_id: string
-       }
-       Insert: {
-         tenancy_id?: string
-         tenant_id: string
-       }
-       Update: Partial<Database['public']['Tables']['tenancy']['Insert']>
-       Relationships: [{
-         foreignKeyName: 'fk_tenant_id'
-         columns: ['tenant_id']
-         isOneToOne: false
-         referencedRelation: 'tenants'
-         referencedColumns: ['tenant_id']
-       }]
-     }
-     tenants: {
-       Row: {
-         tenant_id: string
-         name: string | null
-         email_address: string | null
-       }
-       Insert: {
-         tenant_id?: string
-         name?: string | null
-         email_address?: string | null
-       }
-       Update: Partial<Database['public']['Tables']['tenants']['Insert']>
-       Relationships: []
-     }
-   }
-   Views: { [_ in never]: never }
-   Functions: { [_ in never]: never }
-   Enums: { reminder_type: ReminderType }
-   CompositeTypes: { [_ in never]: never }
- }
-}
-
-type TenantsRelation = {
-  email_address: string | null
-  name: string | null
+type RoomRelation = {
+  room_id: string
+  room_name: string
+  boarding_house_id: string
+  boarding_house: { owner_id: string } | Array<{ owner_id: string }> | null
 } | Array<{
-  email_address: string | null
-  name: string | null
+  room_id: string
+  room_name: string
+  boarding_house_id: string
+  boarding_house: { owner_id: string } | Array<{ owner_id: string }> | null
 }> | null
 
 type TenancyRelation = {
-  tenants: TenantsRelation
+  owner_id: string
+  rooms: RoomRelation
 } | Array<{
-  tenants: TenantsRelation
+  owner_id: string
+  rooms: RoomRelation
 }> | null
 
 type BillRow = {
   bill_id: string
+  period_start: string
   due_date: string
-  total_amount: number | string
-  is_paid: boolean | null
-  paid_at: string | null
   tenancy: TenancyRelation
 }
 
-type ReminderRow = {
+type ClaimedReminder = {
   reminder_id: string
-  delivery_status: ReminderStatus
-  attempt_count: number
-  next_attempt_at: string | null
 }
-
-type Claim = {
-  reminderId: string
-  attemptCount: number
-}
-
-type SendResult =
-  | { kind: 'sent'; attempts: number }
-  | { kind: 'failed'; attempts: number; error: string; retryAt: string | null }
-  | { kind: 'uncertain'; attempts: number; error: string }
-
-const MAX_ATTEMPTS = 5
-const MAX_REQUEST_ATTEMPTS = 3
 
 function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -173,191 +54,56 @@ function isDuplicateKeyError(error: { code?: string }): boolean {
   return error.code === '23505'
 }
 
-function retryDelayMs(attemptCount: number): number {
-  return Math.min(15 * 60_000 * 2 ** Math.max(0, attemptCount - 1), 4 * 60 * 60_000)
-}
-
 async function claimReminder(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient,
   billId: string,
   reminderType: ReminderType,
-  now: Date,
-): Promise<Claim | null> {
-  const nowIso = now.toISOString()
-  const { data: inserted, error: insertError } = await supabase
+  reminderDay: string,
+): Promise<ClaimedReminder | null> {
+  const { data, error } = await supabase
     .from('bill_reminders')
     .insert({
       bill_id: billId,
       reminder_type: reminderType,
-      delivery_status: 'sending',
+      reminder_day: reminderDay,
+      delivery_status: 'pending',
       attempt_count: 1,
-      attempt_started_at: nowIso,
+      attempt_started_at: new Date().toISOString(),
     })
-    .select('reminder_id, attempt_count')
-    .maybeSingle()
-
-  if (!insertError && inserted) {
-    return { reminderId: inserted.reminder_id, attemptCount: inserted.attempt_count }
-  }
-  if (!insertError || !isDuplicateKeyError(insertError)) {
-    throw new Error(`Could not claim reminder: ${insertError?.message ?? 'No row returned.'}`)
-  }
-
-  const { data: existing, error: readError } = await supabase
-    .from('bill_reminders')
-    .select('reminder_id, delivery_status, attempt_count, next_attempt_at')
-    .eq('bill_id', billId)
-    .eq('reminder_type', reminderType)
-    .maybeSingle()
-
-  if (readError) throw new Error(`Could not inspect reminder state: ${readError.message}`)
-  if (!existing) throw new Error('Reminder uniqueness conflict did not return an existing row.')
-
-  const reminder = existing as ReminderRow
-  if (
-    reminder.delivery_status !== 'failed' ||
-    reminder.attempt_count >= MAX_ATTEMPTS ||
-    !reminder.next_attempt_at ||
-    Date.parse(reminder.next_attempt_at) > now.getTime()
-  ) {
-    return null
-  }
-
-  const nextAttemptCount = reminder.attempt_count + 1
-  const { data: claimed, error: claimError } = await supabase
-    .from('bill_reminders')
-    .update({
-      delivery_status: 'sending',
-      attempt_count: nextAttemptCount,
-      attempt_started_at: nowIso,
-      next_attempt_at: null,
-      last_error: null,
-    })
-    .eq('reminder_id', reminder.reminder_id)
-    .eq('delivery_status', 'failed')
-    .eq('attempt_count', reminder.attempt_count)
-    .lte('next_attempt_at', nowIso)
     .select('reminder_id')
     .maybeSingle()
 
-  if (claimError) throw new Error(`Could not retry reminder: ${claimError.message}`)
-  return claimed ? { reminderId: claimed.reminder_id, attemptCount: nextAttemptCount } : null
+  if (!error && data) return data as ClaimedReminder
+  if (error && isDuplicateKeyError(error)) return null
+  throw new Error(`Could not claim owner reminder: ${error?.message ?? 'No row returned.'}`)
 }
 
-async function sendEmail(
-  brevoKey: string,
-  senderEmail: string,
-  recipientEmail: string,
-  recipientName: string | null,
-  amount: string,
-  dueDate: string,
-  reminderType: ReminderType,
-  attemptCount: number,
-): Promise<SendResult> {
-  const recipient = recipientName
-    ? { email: recipientEmail, name: recipientName }
-    : { email: recipientEmail }
-  const dueDescription =
-    reminderType === 'two_days_before' ? 'is due in two days' : 'is due today'
-  const subject =
-    reminderType === 'two_days_before'
-      ? 'Your monthly bill is due in two days'
-      : 'Your monthly bill is due today'
-  const safeName = recipientName ? escapeHtml(recipientName) : 'there'
-  const textContent = `Hello${recipientName ? ` ${recipientName}` : ''}, your bill of PHP ${amount} ${dueDescription} (${dueDate}).`
-  const htmlContent = `<p>Hello ${safeName},</p><p>Your bill of PHP ${amount} ${dueDescription} (${dueDate}).</p>`
-  const maxAttempts = Math.min(MAX_REQUEST_ATTEMPTS, MAX_ATTEMPTS - attemptCount + 1)
-
-  for (let requestAttempt = 1; requestAttempt <= maxAttempts; requestAttempt += 1) {
-    let response: Response
-    try {
-      response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': brevoKey,
-          'Content-Type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify({
-          sender: { name: 'Inkeeper', email: senderEmail },
-          to: [recipient],
-          subject,
-          textContent,
-          htmlContent,
-        }),
-        signal: AbortSignal.timeout(10_000),
-      })
-    } catch (error) {
-      return {
-        kind: 'uncertain',
-        attempts: requestAttempt,
-        error: error instanceof Error ? error.message : 'Email request outcome is unknown.',
-      }
-    }
-
-    if (response.ok) return { kind: 'sent', attempts: requestAttempt }
-
-    if (response.status === 429 && requestAttempt < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, 1_000 * 2 ** (requestAttempt - 1)))
-      continue
-    }
-
-    const error = `Brevo rejected the email request with HTTP ${response.status}.`
-    if (response.status === 429) {
-      return {
-        kind: 'failed',
-        attempts: requestAttempt,
-        error,
-        retryAt: new Date(Date.now() + retryDelayMs(attemptCount + requestAttempt - 1)).toISOString(),
-      }
-    }
-    if (response.status === 408 || response.status >= 500) {
-      return { kind: 'uncertain', attempts: requestAttempt, error }
-    }
-    return { kind: 'failed', attempts: requestAttempt, error, retryAt: null }
-  }
-
-  return {
-    kind: 'failed',
-    attempts: maxAttempts,
-    error: 'Email retry limit reached.',
-    retryAt: null,
-  }
-}
-
-async function updateReminder(
-  supabase: SupabaseClient<Database>,
-  claim: Claim,
-  result: SendResult,
+async function markReminder(
+  supabase: SupabaseClient,
+  reminderId: string,
+  status: 'sent' | 'failed',
+  errorMessage: string | null = null,
 ): Promise<void> {
-  const attemptCount = claim.attemptCount + result.attempts - 1
-  const update: Database['public']['Tables']['bill_reminders']['Update'] =
-    result.kind === 'sent'
-      ? {
-          delivery_status: 'sent',
-          attempt_count: attemptCount,
-          sent_at: new Date().toISOString(),
-          next_attempt_at: null,
-          last_error: null,
-        }
-      : {
-          delivery_status: result.kind,
-          attempt_count: attemptCount,
-          sent_at: null,
-          next_attempt_at: result.kind === 'failed' ? result.retryAt : null,
-          last_error: result.error.slice(0, 500),
-        }
-
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('bill_reminders')
-    .update(update)
-    .eq('reminder_id', claim.reminderId)
-    .eq('delivery_status', 'sending')
-    .select('reminder_id')
-    .maybeSingle()
+    .update(
+      status === 'sent'
+        ? {
+            delivery_status: 'sent',
+            sent_at: new Date().toISOString(),
+            last_error: null,
+            retry_at: null,
+          }
+        : {
+            delivery_status: 'failed',
+            sent_at: null,
+            retry_at: null,
+            last_error: errorMessage?.slice(0, 500) ?? 'Owner notification delivery failed.',
+          },
+    )
+    .eq('reminder_id', reminderId)
 
-  if (error) throw new Error(`Could not record reminder result: ${error.message}`)
-  if (!data) throw new Error('Reminder claim was lost before recording its result.')
+  if (error) throw new Error(`Could not record owner reminder result: ${error.message}`)
 }
 
 Deno.serve(async (request: Request) => {
@@ -366,12 +112,8 @@ Deno.serve(async (request: Request) => {
   }
 
   const expectedCronToken = Deno.env.get('BILL_REMINDERS_CRON_TOKEN')
-  if (!expectedCronToken) {
-    console.error('Bill reminder cron authentication is missing required server configuration.')
-    return jsonResponse({ error: 'Bill reminder delivery is not configured.' }, 500)
-  }
-
   if (
+    !expectedCronToken ||
     !secretMatches(
       request.headers.get('x-bill-reminders-cron-token'),
       expectedCronToken,
@@ -382,69 +124,61 @@ Deno.serve(async (request: Request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serverApiSecret = Deno.env.get('SERVER_API_SECRET')
-  const brevoKey = Deno.env.get('BREVO_API_KEY')
-  const senderEmail = Deno.env.get('BREVO_SENDER_EMAIL')
-  if (!supabaseUrl || !serverApiSecret || !brevoKey || !senderEmail) {
-    console.error('Bill reminder delivery is missing required server configuration.')
-    return jsonResponse({ error: 'Bill reminder delivery is not configured.' }, 500)
+  if (!supabaseUrl || !serverApiSecret) {
+    console.error('Owner bill reminders are missing required server configuration.')
+    return jsonResponse({ error: 'Owner reminder delivery is not configured.' }, 500)
   }
 
-  const supabase = createClient<Database>(supabaseUrl, serverApiSecret, {
+  const supabase = createClient(supabaseUrl, serverApiSecret, {
     auth: { autoRefreshToken: false, persistSession: false },
   })
   const today = manilaDate(new Date())
   const twoDaysAhead = addDays(today, 2)
   const { data, error } = await supabase
     .from('monthly_bill')
-    .select('bill_id, due_date, total_amount, is_paid, paid_at, tenancy(tenancy_id, tenants(email_address, name))')
-    .in('due_date', [today, twoDaysAhead])
-    .is('paid_at', null)
-    .or('is_paid.is.null,is_paid.eq.false')
+    .select(
+      'bill_id, period_start, due_date, tenancy!inner(owner_id, rooms!inner(room_id, room_name, boarding_house_id, boarding_house!inner(owner_id)))',
+    )
+    .is('billed_at', null)
+    .lte('due_date', twoDaysAhead)
 
   if (error) {
-    console.error('Could not load eligible bills for reminders:', error.message)
+    console.error('Could not load bills needing owner reminders:', error.message)
     return jsonResponse({ error: 'Could not load eligible bills.' }, 500)
   }
 
-  let sent = 0
+  let notified = 0
   let failed = 0
-  let uncertain = 0
   let skipped = 0
 
   for (const bill of (data ?? []) as BillRow[]) {
-    if (bill.is_paid === true || bill.paid_at !== null) {
-      skipped += 1
-      continue
-    }
-
-    const reminderType = reminderTypeForDueDate(bill.due_date, today)
-    if (!reminderType) {
-      skipped += 1
-      continue
-    }
-
     const tenancy = firstRelation(bill.tenancy)
-    const tenant = firstRelation(tenancy?.tenants)
-    const recipientEmail = tenant?.email_address?.trim()
-    if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
-      console.error(`Skipping bill ${bill.bill_id}: tenant email is missing or invalid.`)
+    const room = firstRelation(tenancy?.rooms)
+    const boardingHouse = firstRelation(room?.boarding_house)
+    const content = ownerReminderContent(room?.room_name ?? 'this room', bill.due_date, today)
+
+    if (
+      !content ||
+      !tenancy?.owner_id ||
+      !room ||
+      !boardingHouse ||
+      boardingHouse.owner_id !== tenancy.owner_id
+    ) {
       skipped += 1
       continue
     }
 
-    const numericAmount = Number(bill.total_amount)
-    if (!Number.isFinite(numericAmount) || numericAmount < 0) {
-      console.error(`Skipping bill ${bill.bill_id}: bill amount is invalid.`)
-      skipped += 1
-      continue
-    }
-
-    let claim: Claim | null
+    let claim: ClaimedReminder | null
     try {
-      claim = await claimReminder(supabase, bill.bill_id, reminderType, new Date())
+      claim = await claimReminder(
+        supabase,
+        bill.bill_id,
+        content.type,
+        today,
+      )
     } catch (claimError) {
       console.error(
-        `Could not claim reminder for bill ${bill.bill_id}:`,
+        `Could not claim owner reminder for bill ${bill.bill_id}:`,
         claimError instanceof Error ? claimError.message : claimError,
       )
       failed += 1
@@ -456,42 +190,65 @@ Deno.serve(async (request: Request) => {
       continue
     }
 
-    const amount = new Intl.NumberFormat('en-PH', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numericAmount)
-    const result = await sendEmail(
-      brevoKey,
-      senderEmail,
-      recipientEmail,
-      tenant?.name?.trim() || null,
-      amount,
-      bill.due_date,
-      reminderType,
-      claim.attemptCount,
-    )
-
-    try {
-      await updateReminder(supabase, claim, result)
-    } catch (updateError) {
-      console.error(
-        `Could not record reminder result for bill ${bill.bill_id}:`,
-        updateError instanceof Error ? updateError.message : updateError,
+    const eventKey = `owner-reading:${content.type}:${bill.bill_id}:${today}`
+    const { error: notificationError } = await supabase
+      .from('notifications')
+      .upsert(
+        {
+          owner_id: tenancy.owner_id,
+          event_key: eventKey,
+          type: 'meter_reading_required',
+          title: content.title,
+          message: content.message,
+          related_bill_id: bill.bill_id,
+          data: {
+            room_id: room.room_id,
+            boarding_house_id: room.boarding_house_id,
+            period: bill.period_start.slice(0, 7),
+            reminder_type: content.type,
+            reminder_day: today,
+          },
+        },
+        {
+          onConflict: 'owner_id,event_key',
+          ignoreDuplicates: true,
+        },
       )
+
+    if (notificationError) {
+      console.error(
+        `Could not create owner reminder notification for bill ${bill.bill_id}:`,
+        notificationError.message,
+      )
+      try {
+        await markReminder(supabase, claim.reminder_id, 'failed', notificationError.message)
+      } catch (recordError) {
+        console.error(
+          `Could not record owner reminder failure for bill ${bill.bill_id}:`,
+          recordError instanceof Error ? recordError.message : recordError,
+        )
+      }
       failed += 1
       continue
     }
 
-    if (result.kind === 'sent') {
-      sent += 1
-    } else if (result.kind === 'uncertain') {
-      console.error(`Reminder delivery outcome is uncertain for bill ${bill.bill_id}:`, result.error)
-      uncertain += 1
-    } else {
-      console.error(`Reminder delivery failed for bill ${bill.bill_id}:`, result.error)
+    try {
+      await markReminder(supabase, claim.reminder_id, 'sent')
+      notified += 1
+    } catch (recordError) {
+      console.error(
+        `Could not record owner reminder delivery for bill ${bill.bill_id}:`,
+        recordError instanceof Error ? recordError.message : recordError,
+      )
       failed += 1
     }
   }
 
-  return jsonResponse({ checked: data?.length ?? 0, sent, failed, uncertain, skipped })
+  return jsonResponse({
+    checked: data?.length ?? 0,
+    notified,
+    failed,
+    skipped,
+    reminderDay: today,
+  })
 })
