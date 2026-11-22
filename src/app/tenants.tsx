@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -31,7 +31,20 @@ type TenantRow = {
   archiveId?: string;
 };
 
+type TenantSearchRow = {
+  record_id: string;
+  tenant_name: string;
+  room_name: string | null;
+  boarding_house_name: string | null;
+  room_id: string | null;
+  boarding_house_id: string | null;
+  move_in_date: string | null;
+  move_out_date: string | null;
+  total_count: number;
+};
+
 const PAGE_SIZE = 10;
+const SEARCH_DEBOUNCE_MS = 275;
 const STATUS_OPTIONS: { value: TenantStatus; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'scheduled', label: 'Scheduled' },
@@ -45,14 +58,22 @@ function formatDate(value: string | null) {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Could not load tenants. Please try again.';
+function normalizeSearch(value: string) {
+  return value.trim().replace(/\s+/g, ' ');
 }
 
-function getRelatedRecord<T extends object>(
-  relation: T | T[] | null | undefined,
-): T | undefined {
-  return Array.isArray(relation) ? relation[0] : relation ?? undefined;
+function logTenantLoadError(error: unknown) {
+  if (typeof error === 'object' && error !== null) {
+    const details = {
+      code: 'code' in error ? error.code : undefined,
+      message: 'message' in error ? error.message : undefined,
+      details: 'details' in error ? error.details : undefined,
+      hint: 'hint' in error ? error.hint : undefined,
+    };
+    console.error('Could not load tenant search results.', details);
+    return;
+  }
+  console.error('Could not load tenant search results.', error);
 }
 
 export default function TenantsScreen() {
@@ -62,12 +83,14 @@ export default function TenantsScreen() {
   const { rooms } = useRooms();
   const [status, setStatus] = useState<TenantStatus>('active');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [pageCount, setPageCount] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const requestVersion = useRef(0);
   const currentHouseNames = useMemo(
     () => new Map(boardingHouses.map((house) => [house.id, house.name])),
     [boardingHouses],
@@ -78,7 +101,19 @@ export default function TenantsScreen() {
   );
 
   useEffect(() => {
+    const nextSearch = normalizeSearch(search);
+    if (!nextSearch) {
+      setDebouncedSearch('');
+      return;
+    }
+
+    const timeout = setTimeout(() => setDebouncedSearch(nextSearch), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+  useEffect(() => {
     let isCurrent = true;
+    const currentRequest = ++requestVersion.current;
 
     const loadTenants = async () => {
       setIsLoading(true);
@@ -94,92 +129,40 @@ export default function TenantsScreen() {
 
       try {
         const client = getSupabaseClient();
-        const ownerId = session.user.id;
-        const query = search.trim();
         const from = (page - 1) * PAGE_SIZE;
-        const to = from + PAGE_SIZE - 1;
-        let rows: TenantRow[] = [];
-        let count = 0;
+        const { data, error } = await client.rpc('search_tenant_list', {
+          p_status: status,
+          p_search: debouncedSearch,
+          p_offset: from,
+          p_limit: PAGE_SIZE,
+        });
+        if (error) throw error;
 
-        if (status === 'archived') {
-          let archivedQuery = client
-            .from('tenant_archive')
-            .select(
-              'archive_id, tenant_name, room_name, boarding_house_name, move_in_date, move_out_date',
-              { count: 'exact' },
-            )
-            .eq('owner_id', ownerId);
+        const resultRows = (data ?? []) as TenantSearchRow[];
+        const rows = resultRows.map((row) => ({
+          key: row.record_id,
+          archiveId: status === 'archived' ? row.record_id : undefined,
+          name: row.tenant_name,
+          roomName: row.room_name ?? 'Room unavailable',
+          boardingHouseName: row.boarding_house_name ?? 'Boarding house unavailable',
+          moveInDate: row.move_in_date,
+          moveOutDate: row.move_out_date,
+          roomId: row.room_id ?? undefined,
+          boardingHouseId: row.boarding_house_id ?? undefined,
+        }));
+        const count = resultRows[0]?.total_count ?? 0;
 
-          if (query) {
-            const term = query.replaceAll(',', '\\,');
-            archivedQuery = archivedQuery.or(
-              `tenant_name.ilike.%${term}%,room_name.ilike.%${term}%`,
-            );
-          }
-
-          const { data, count: resultCount, error } = await archivedQuery
-            .order('move_out_date', { ascending: false })
-            .range(from, to);
-          if (error) throw error;
-          count = resultCount ?? 0;
-          rows = (data ?? []).map((row) => ({
-            key: row.archive_id,
-            archiveId: row.archive_id,
-            name: row.tenant_name,
-            roomName: row.room_name ?? 'Room unavailable',
-            boardingHouseName: row.boarding_house_name ?? 'Boarding house unavailable',
-            moveInDate: row.move_in_date,
-            moveOutDate: row.move_out_date,
-          }));
-        } else {
-          let tenancyQuery = client
-            .from('tenancy')
-            .select(
-              'tenancy_id, move_in_date, tenants(tenant_id,name), rooms(room_id,room_name,boarding_house_id,boarding_house(name))',
-              { count: 'exact' },
-            )
-            .eq('owner_id', ownerId)
-            .eq('status', status);
-
-          if (query) {
-            const term = query.replaceAll(',', '\\,');
-            tenancyQuery = tenancyQuery.or(
-              `tenants.name.ilike.%${term}%,rooms.room_name.ilike.%${term}%`,
-            );
-          }
-
-          const { data, count: resultCount, error } = await tenancyQuery
-            .order('move_in_date', { ascending: status === 'scheduled' })
-            .range(from, to);
-          if (error) throw error;
-          count = resultCount ?? 0;
-          rows = (data ?? []).map((row) => {
-            const tenant = getRelatedRecord(row.tenants);
-            const room = getRelatedRecord(row.rooms);
-            const boardingHouse = getRelatedRecord(room?.boarding_house);
-            return {
-              key: row.tenancy_id,
-              name: tenant?.name ?? 'Tenant unavailable',
-              roomName: room?.room_name ?? 'Room unavailable',
-              boardingHouseName: boardingHouse?.name ?? 'Boarding house unavailable',
-              moveInDate: row.move_in_date,
-              moveOutDate: null,
-              roomId: room?.room_id,
-              boardingHouseId: room?.boarding_house_id,
-            };
-          });
-        }
-
-        if (!isCurrent) return;
+        if (!isCurrent || currentRequest !== requestVersion.current) return;
         setTenants(rows);
         setPageCount(Math.max(1, Math.ceil(count / PAGE_SIZE)));
       } catch (error: unknown) {
-        if (!isCurrent) return;
+        if (!isCurrent || currentRequest !== requestVersion.current) return;
+        logTenantLoadError(error);
         setTenants([]);
         setPageCount(1);
-        setLoadError(errorMessage(error));
+        setLoadError('Could not load tenants. Please try again.');
       } finally {
-        if (isCurrent) setIsLoading(false);
+        if (isCurrent && currentRequest === requestVersion.current) setIsLoading(false);
       }
     };
 
@@ -187,10 +170,13 @@ export default function TenantsScreen() {
     return () => {
       isCurrent = false;
     };
-  }, [loadAttempt, page, search, session?.user.id, status]);
+  }, [debouncedSearch, loadAttempt, page, session?.user.id, status]);
 
   const selectStatus = (nextStatus: TenantStatus) => {
     if (nextStatus === status) return;
+    requestVersion.current += 1;
+    setIsLoading(true);
+    setLoadError(null);
     setStatus(nextStatus);
     setPage(1);
   };
@@ -208,10 +194,15 @@ export default function TenantsScreen() {
           accessibilityLabel="Search tenants"
           autoCapitalize="none"
           onChangeText={(value) => {
+            requestVersion.current += 1;
+            if (normalizeSearch(value) !== debouncedSearch) {
+              setIsLoading(true);
+              setLoadError(null);
+            }
             setSearch(value);
             setPage(1);
           }}
-          placeholder="Search tenant name or room..."
+          placeholder="Search tenant, room, or boarding house..."
           placeholderTextColor="#94A3B8"
           returnKeyType="search"
           style={styles.searchInput}
@@ -253,7 +244,11 @@ export default function TenantsScreen() {
       ) : tenants.length === 0 ? (
         <View style={styles.stateCard}>
           <Ionicons color={DashboardColors.neutral} name="people-outline" size={32} />
-          <Text style={styles.stateText}>No tenants match this view.</Text>
+          <Text style={styles.stateText}>
+            {debouncedSearch
+              ? `No tenants found for '${debouncedSearch}'.`
+              : 'No tenants match this view.'}
+          </Text>
         </View>
       ) : (
         <ScrollView
