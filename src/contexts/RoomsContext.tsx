@@ -10,6 +10,7 @@ import {
   TENANT_DOCUMENT_MIME_TYPES,
   type TenantDocumentImage,
   type TenantDocumentKind,
+  type TenantDocumentProgressState,
 } from '@/data/tenantDocuments';
 import { getSupabaseClient } from '@/utils/supabase';
 
@@ -109,7 +110,10 @@ type ContextValue = {
     roomId: string,
     input: NewTenantInput,
     customCharges?: TenantChargeOverrides,
-    onDocumentUpload?: (kind: TenantDocumentKind | null) => void,
+    onDocumentProgress?: (
+      kind: TenantDocumentKind,
+      state: TenantDocumentProgressState,
+    ) => void,
   ) => Promise<string | null>;
   refreshTenantDocument: (roomId: string, kind: TenantDocumentKind) => Promise<string>;
   replaceTenantDocument: (
@@ -184,6 +188,7 @@ function isMissingStorageObject(error: unknown): boolean {
 
 export async function signedDocumentUrl(path: string | null): Promise<string> {
   if (!path) return '';
+  const startedAt = Date.now();
   if (/^https?:\/\//i.test(path)) return path;
   const pathParts = path.split('/');
   const isCurrentDocumentPath =
@@ -197,6 +202,9 @@ export async function signedDocumentUrl(path: string | null): Promise<string> {
   if (error) {
     if (isMissingStorageObject(error)) return '';
     throw error;
+  }
+  if (__DEV__) {
+    console.info(`[TenantDocuments] Signed URL creation: ${Date.now() - startedAt}ms`);
   }
   return data.signedUrl;
 }
@@ -294,13 +302,13 @@ async function removeIfUnreferenced(ownerId: string, path: string): Promise<void
 }
 
 async function cleanupUploadedDocuments(ownerId: string, paths: string[]): Promise<void> {
-  for (const path of paths) {
+  await Promise.all(paths.map(async (path) => {
     try {
       await removeIfUnreferenced(ownerId, path);
     } catch (cleanupError: unknown) {
       console.error('Could not safely remove an unreferenced tenant document.', cleanupError);
     }
-  }
+  }));
 }
 
 export function RoomsProvider({ children }: { children: ReactNode }) {
@@ -363,8 +371,8 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
                 email: tenantRow.email_address ?? '',
                 contactNumber: tenantRow.contact_number ?? '',
                 startDate: tenancy.move_in_date,
-                idImageUri: await signedDocumentUrl(tenantRow.id_photo_url),
-                contractImageUri: await signedDocumentUrl(tenancy.agreement_photo_url),
+                idImageUri: '',
+                contractImageUri: '',
                 idImagePath: tenantRow.id_photo_url ?? '',
                 contractImagePath: tenancy.agreement_photo_url ?? '',
               };
@@ -552,31 +560,48 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         );
         return updatedRoom;
       },
-      assignTenant: async (roomId, input, customCharges = {}, onDocumentUpload) => {
+      assignTenant: async (roomId, input, customCharges = {}, onDocumentProgress) => {
         if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
         const uploadedPaths: string[] = [];
         const registrationId = uniqueStorageToken();
 
         try {
-          onDocumentUpload?.('id');
-          const idPhotoPath = await uploadDocument(
-            ownerId,
-            roomId,
-            registrationId,
-            'id',
-            input.idImage,
-            (path) => uploadedPaths.push(path),
-          );
-          onDocumentUpload?.('agreement');
-          const contractPath = await uploadDocument(
-            ownerId,
-            roomId,
-            registrationId,
-            'agreement',
-            input.contractImage,
-            (path) => uploadedPaths.push(path),
-          );
-          onDocumentUpload?.(null);
+          const upload = async (kind: TenantDocumentKind, image: TenantDocumentImage) => {
+            const startedAt = Date.now();
+            onDocumentProgress?.(kind, 'uploading');
+            try {
+              const path = await uploadDocument(
+                ownerId,
+                roomId,
+                registrationId,
+                kind,
+                image,
+                (candidatePath) => uploadedPaths.push(candidatePath),
+              );
+              onDocumentProgress?.(kind, 'done');
+              if (__DEV__) {
+                console.info(`[TenantDocuments] ${kind} upload: ${Date.now() - startedAt}ms`);
+              }
+              return path;
+            } catch (error: unknown) {
+              onDocumentProgress?.(kind, 'failed');
+              if (__DEV__) {
+                console.info(
+                  `[TenantDocuments] ${kind} upload failed: ${Date.now() - startedAt}ms`,
+                );
+              }
+              throw error;
+            }
+          };
+
+          const [idResult, agreementResult] = await Promise.allSettled([
+            upload('id', input.idImage),
+            upload('agreement', input.contractImage),
+          ]);
+          if (idResult.status === 'rejected') throw idResult.reason;
+          if (agreementResult.status === 'rejected') throw agreementResult.reason;
+          const idPhotoPath = idResult.value;
+          const contractPath = agreementResult.value;
 
           const selectedCharges = CHARGES.flatMap(({ key }) => {
             const rate = customCharges[key]?.trim();
@@ -584,6 +609,7 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
               ? []
               : [{ item_type: key, unit_price: Number(rate) }];
           });
+          const rpcStartedAt = Date.now();
           const { data: tenancyId, error } = await getSupabaseClient().rpc(
             'register_tenancy_with_opening_reading',
             {
@@ -598,6 +624,9 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
               p_opening_reading_value: input.openingMeterReading,
             },
           );
+          if (__DEV__) {
+            console.info(`[TenantDocuments] Registration RPC: ${Date.now() - rpcStartedAt}ms`);
+          }
           if (error) throw error;
           if (!tenancyId) throw new Error('The tenancy was saved without returning its identifier.');
           const tenant: Tenant = {
@@ -618,36 +647,10 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
               room.id === roomId ? { ...room, status: 'occupied', tenant } : room,
             ),
           );
-          try {
-            const [idImageUri, contractImageUri] = await Promise.all([
-              signedDocumentUrl(idPhotoPath),
-              signedDocumentUrl(contractPath),
-            ]);
-            if (!idImageUri || !contractImageUri) {
-              throw new Error('A saved document could not be retrieved from private storage.');
-            }
-            setRooms((current) =>
-              current.map((room) =>
-                room.id === roomId
-                  ? {
-                      ...room,
-                      tenant: room.tenant
-                        ? { ...room.tenant, idImageUri, contractImageUri }
-                        : room.tenant,
-                    }
-                  : room,
-              ),
-            );
-            return null;
-          } catch (documentError: unknown) {
-            console.error('Tenant registration succeeded, but secure document preview failed.', documentError);
-            return 'Tenant registered, but the document preview could not be prepared. Reopen the room to retry.';
-          }
+          return null;
         } catch (error: unknown) {
           await cleanupUploadedDocuments(ownerId, uploadedPaths);
           throw error;
-        } finally {
-          onDocumentUpload?.(null);
         }
       },
       refreshTenantDocument: async (roomId, kind) => {

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AnimatedButton from '@/components/AnimatedButton';
 import ImageField from '@/components/ImageField';
-import RoomLabel, { formatRoomLabel } from '@/components/RoomLabel';
+import RoomLabel from '@/components/RoomLabel';
 import { useBills } from '@/contexts/BillsContext';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
@@ -54,6 +54,7 @@ export default function RoomDetailScreen() {
   } = useBills();
   const room = roomId ? getRoomById(roomId) : undefined;
   const houseName = room ? getHouseById(room.boardingHouseId)?.name : undefined;
+  const tenantRoomId = room && isOccupied(room) ? room.id : null;
 
   const [tab, setTab] = useState<RoomTab>('info');
   const [viewerUri, setViewerUri] = useState<string | null>(null);
@@ -69,11 +70,19 @@ export default function RoomDetailScreen() {
   const [documentLoadErrors, setDocumentLoadErrors] = useState<
     Partial<Record<TenantDocumentKind, string>>
   >({});
+  const [documentsLoading, setDocumentsLoading] = useState<
+    Partial<Record<TenantDocumentKind, boolean>>
+  >({});
   const [meterReadings, setMeterReadings] = useState<MeterReading[]>([]);
   const [isLoadingMeterReadings, setIsLoadingMeterReadings] = useState(true);
   const [meterReadingsError, setMeterReadingsError] = useState<string | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
+  const refreshTenantDocumentRef = useRef(refreshTenantDocument);
+
+  useEffect(() => {
+    refreshTenantDocumentRef.current = refreshTenantDocument;
+  }, [refreshTenantDocument]);
 
   const retryDocument = async (kind: TenantDocumentKind, force = false) => {
     if (!force && (documentRetryCount[kind] ?? 0) >= 1) {
@@ -89,7 +98,7 @@ export default function RoomDetailScreen() {
       [kind]: force ? 1 : (current[kind] ?? 0) + 1,
     }));
     try {
-      const uri = await refreshTenantDocument(roomId ?? '', kind);
+      const uri = await refreshTenantDocumentRef.current(roomId ?? '', kind);
       if (!uri) {
         setDocumentLoadErrors((current) => ({
           ...current,
@@ -153,6 +162,37 @@ export default function RoomDetailScreen() {
     },
     [roomId],
   );
+
+  useEffect(() => {
+    if (!tenantRoomId) return;
+    let isCurrent = true;
+    const kinds: TenantDocumentKind[] = ['id', 'agreement'];
+    setDocumentsLoading({ id: true, agreement: true });
+    setDocumentLoadErrors({});
+
+    void Promise.allSettled(
+      kinds.map(async (kind) => {
+        try {
+          const uri = await refreshTenantDocumentRef.current(tenantRoomId, kind);
+          if (!uri) throw new Error('This document is unavailable.');
+        } catch (error: unknown) {
+          if (!isCurrent) return;
+          setDocumentLoadErrors((current) => ({
+            ...current,
+            [kind]: error instanceof Error ? error.message : 'Could not load this document.',
+          }));
+        } finally {
+          if (isCurrent) {
+            setDocumentsLoading((current) => ({ ...current, [kind]: false }));
+          }
+        }
+      }),
+    );
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [tenantRoomId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -285,6 +325,7 @@ export default function RoomDetailScreen() {
                 <PhotoCard
                   label="Valid ID"
                   uri={tenant.idImageUri}
+                  loading={documentsLoading.id}
                   error={documentLoadErrors.id}
                   onPress={(uri) => {
                     setViewerDocumentKind('id');
@@ -301,6 +342,7 @@ export default function RoomDetailScreen() {
                 <PhotoCard
                   label="Contract"
                   uri={tenant.contractImageUri}
+                  loading={documentsLoading.agreement}
                   error={documentLoadErrors.agreement}
                   onPress={(uri) => {
                     setViewerDocumentKind('agreement');
@@ -624,6 +666,7 @@ function PhotoCard({
   label,
   uri,
   error,
+  loading,
   onPress,
   onReplace,
   onError,
@@ -633,6 +676,7 @@ function PhotoCard({
   label: string;
   uri: string;
   error?: string;
+  loading?: boolean;
   onPress: (uri: string) => void;
   onReplace: () => void;
   onError: () => void;
@@ -642,7 +686,12 @@ function PhotoCard({
   return (
     <View style={styles.card}>
       <Text style={styles.photoLabel}>{label}</Text>
-      {uri ? (
+      {loading ? (
+        <View style={[styles.photo, styles.photoLoading]}>
+          <ActivityIndicator color="#2563EB" />
+          <Text style={styles.photoHint}>Loading document…</Text>
+        </View>
+      ) : uri ? (
         <Pressable
           onPress={() => onPress(uri)}
           accessibilityRole="imagebutton"
@@ -890,6 +939,11 @@ const styles = StyleSheet.create({
   photoUnavailable: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  photoLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   photoHint: {
     color: '#6B7280',

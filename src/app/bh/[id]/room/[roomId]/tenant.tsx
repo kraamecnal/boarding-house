@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     ActivityIndicator,
@@ -23,7 +23,10 @@ import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { addOneMonth, useRooms } from '@/contexts/RoomsContext';
 import { CHARGES, isChargeType, type ChargeType } from '@/data/charges';
-import type { TenantDocumentImage, TenantDocumentKind } from '@/data/tenantDocuments';
+import type {
+  TenantDocumentImage,
+  TenantDocumentProgressState,
+} from '@/data/tenantDocuments';
 import { formatPeso, sanitizeAmountInput } from '@/utils/billing';
 import { parseMeterReadingInput, sanitizeMeterReadingInput } from '@/utils/meterReadings';
 import { getSupabaseClient } from '@/utils/supabase';
@@ -78,7 +81,9 @@ export default function RegisterTenantScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [idImage, setIdImage] = useState<TenantDocumentImage | null>(null);
   const [contractImage, setContractImage] = useState<TenantDocumentImage | null>(null);
-  const [uploadingDocument, setUploadingDocument] = useState<TenantDocumentKind | null>(null);
+  const [documentProgress, setDocumentProgress] = useState<
+    Record<'id' | 'agreement', TenantDocumentProgressState>
+  >({ id: 'idle', agreement: 'idle' });
   const [customChargesEnabled, setCustomChargesEnabled] = useState(false);
   const [selectedCustomCharges, setSelectedCustomCharges] = useState<Record<ChargeType, boolean>>({
     water: false,
@@ -94,6 +99,7 @@ export default function RegisterTenantScreen() {
   const [defaultsAttempt, setDefaultsAttempt] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
 
   useEffect(() => {
     let isCurrent = true;
@@ -173,7 +179,7 @@ export default function RegisterTenantScreen() {
   }
 
   const handleSubmit = async () => {
-    if (isSubmitting) return;
+    if (submissionInFlight.current || isSubmitting) return;
     if (!firstName.trim() || !lastName.trim())
       return Alert.alert('Missing info', "Please enter the tenant's full name.");
     if (!email.trim()) return Alert.alert('Missing info', 'Please enter an email address.');
@@ -223,7 +229,9 @@ export default function RegisterTenantScreen() {
     }
 
     setSubmitError(null);
+    submissionInFlight.current = true;
     setIsSubmitting(true);
+    setDocumentProgress({ id: 'idle', agreement: 'idle' });
     try {
       const notice = await assignTenant(
         room.id,
@@ -238,7 +246,9 @@ export default function RegisterTenantScreen() {
           contractImage,
         },
         customChargesEnabled ? customRates : {},
-        setUploadingDocument,
+        (kind, state) => {
+          setDocumentProgress((current) => ({ ...current, [kind]: state }));
+        },
       );
       if (notice) {
         Alert.alert('Tenant registered', notice, [{ text: 'OK', onPress: () => router.back() }]);
@@ -253,6 +263,7 @@ export default function RegisterTenantScreen() {
           : message,
       );
     } finally {
+      submissionInFlight.current = false;
       setIsSubmitting(false);
     }
   };
@@ -430,7 +441,7 @@ export default function RegisterTenantScreen() {
             />
             <Text style={styles.readingHelper}>
               Enter the number shown on the electricity meter on the move-in date. This is the
-              tenant's starting point, so they are not charged for earlier use.
+              tenant&apos;s starting point, so they are not charged for earlier use.
             </Text>
           </>
         ) : (
@@ -475,7 +486,8 @@ export default function RegisterTenantScreen() {
           image={idImage}
           onChange={setIdImage}
           placeholder="Tap to attach a photo of a valid ID"
-          isUploading={uploadingDocument === 'id'}
+          isUploading={documentProgress.id === 'uploading'}
+          progressState={documentProgress.id}
           disabled={isSubmitting}
         />
 
@@ -484,7 +496,8 @@ export default function RegisterTenantScreen() {
           image={contractImage}
           onChange={setContractImage}
           placeholder="Tap to attach a photo of the signed contract"
-          isUploading={uploadingDocument === 'agreement'}
+          isUploading={documentProgress.agreement === 'uploading'}
+          progressState={documentProgress.agreement}
           disabled={isSubmitting}
         />
 

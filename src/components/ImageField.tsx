@@ -1,3 +1,4 @@
+import { File as ExpoFile } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import {
@@ -14,6 +15,7 @@ import {
   TENANT_DOCUMENT_MAX_BYTES,
   TENANT_DOCUMENT_MIME_TYPES,
   type TenantDocumentImage,
+  type TenantDocumentProgressState,
 } from '@/data/tenantDocuments';
 
 export type { TenantDocumentImage } from '@/data/tenantDocuments';
@@ -24,6 +26,7 @@ type Props = {
   onChange: (image: TenantDocumentImage | null) => void;
   placeholder: string;
   isUploading?: boolean;
+  progressState?: TenantDocumentProgressState;
   disabled?: boolean;
 };
 
@@ -48,13 +51,16 @@ export default function ImageField({
   onChange,
   placeholder,
   isUploading = false,
+  progressState = 'idle',
   disabled = false,
 }: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const [isPicking, setIsPicking] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectImage = async (source: 'camera' | 'library') => {
+    const startedAt = Date.now();
     setShowPicker(false);
     setError(null);
     setIsPicking(true);
@@ -75,7 +81,7 @@ export default function ImageField({
 
       const options: ImagePicker.ImagePickerOptions = {
         mediaTypes: ['images'],
-        quality: 0.8,
+        quality: 0.78,
       };
       const result =
         source === 'camera'
@@ -90,17 +96,50 @@ export default function ImageField({
         return;
       }
 
-      const fileSize = asset.fileSize ?? asset.file?.size;
-      if (fileSize !== undefined && fileSize > TENANT_DOCUMENT_MAX_BYTES) {
-        setError('Choose an image smaller than 5 MB.');
+      setIsPreparing(true);
+      let processedUri = asset.uri;
+      let processedMimeType = mimeType;
+      try {
+        const { ImageManipulator, SaveFormat } = await import('expo-image-manipulator');
+        const manipulator = ImageManipulator.manipulate(asset.uri);
+        if (Math.max(asset.width, asset.height) > 1800) {
+          if (asset.width >= asset.height) {
+            manipulator.resize({ width: 1800 });
+          } else {
+            manipulator.resize({ height: 1800 });
+          }
+        }
+        const renderedImage = await manipulator.renderAsync();
+        const processed = await renderedImage.saveAsync({
+          compress: 0.78,
+          format: SaveFormat.JPEG,
+        });
+        processedUri = processed.uri;
+        processedMimeType = 'image/jpeg';
+      } catch (manipulationError: unknown) {
+        if (__DEV__) {
+          console.info(
+            '[TenantDocuments] Image resizing unavailable in the current native build; using picker compression.',
+            manipulationError,
+          );
+        }
+      }
+      const processedFile = new ExpoFile(processedUri);
+      const fileSize = processedFile.size;
+      if (!Number.isFinite(fileSize) || fileSize <= 0) {
+        setError('Could not determine the processed image size. Select it again.');
+        return;
+      }
+      if (fileSize > TENANT_DOCUMENT_MAX_BYTES) {
+        setError('The processed image is still larger than 5 MB. Try a lower-resolution photo.');
         return;
       }
 
       onChange({
-        uri: asset.uri,
-        mimeType,
+        uri: processedUri,
+        mimeType: processedMimeType,
         fileSize,
-        file: asset.file,
+        file: processedFile,
       });
     } catch (selectionError: unknown) {
       setError(
@@ -109,11 +148,29 @@ export default function ImageField({
           : 'Could not select this image. Please try again.',
       );
     } finally {
+      setIsPreparing(false);
       setIsPicking(false);
+      if (__DEV__) {
+        console.info(
+          `[TenantDocuments] ${label} selection/processing: ${Date.now() - startedAt}ms`,
+        );
+      }
     }
   };
 
-  const locked = disabled || isUploading || isPicking;
+  const locked = disabled || isUploading || isPicking || isPreparing;
+  const visibleState = isPreparing
+    ? 'preparing'
+    : isPicking
+      ? 'idle'
+      : progressState;
+  const stateLabel = {
+    idle: isPicking ? 'Opening picker' : '',
+    preparing: 'Preparing photo',
+    uploading: 'Uploading',
+    done: 'Upload complete',
+    failed: 'Upload failed',
+  }[visibleState];
 
   return (
     <View>
@@ -146,11 +203,18 @@ export default function ImageField({
             <Text style={styles.removeLabel}>Remove</Text>
           </Pressable>
         )}
-        {(isUploading || isPicking) && (
+        {(isUploading || isPicking || isPreparing || visibleState === 'done' || visibleState === 'failed') && (
           <View style={styles.uploading}>
-            <ActivityIndicator color="#2563EB" size="small" />
-            <Text style={styles.uploadingLabel}>
-              {isUploading ? 'Uploading' : 'Opening picker'}
+            {(isUploading || isPicking || isPreparing) && (
+              <ActivityIndicator color="#2563EB" size="small" />
+            )}
+            <Text
+              style={[
+                styles.uploadingLabel,
+                visibleState === 'done' && styles.successLabel,
+                visibleState === 'failed' && styles.failedLabel,
+              ]}>
+              {stateLabel}
             </Text>
           </View>
         )}
@@ -256,6 +320,14 @@ const styles = StyleSheet.create({
   uploadingLabel: {
     color: '#64748B',
     fontSize: 12,
+  },
+  successLabel: {
+    color: '#1E3A8A',
+    fontWeight: '600',
+  },
+  failedLabel: {
+    color: '#B42318',
+    fontWeight: '600',
   },
   hint: {
     color: '#64748B',
