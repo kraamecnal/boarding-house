@@ -350,6 +350,17 @@ function getReadableAuthError(
   if (normalized.includes('fetch') || normalized.includes('network')) {
     return 'Unable to reach the sign-in service. Check your internet connection and try again.';
   }
+  if (
+    mode === 'sign-in' &&
+    (code === 'user_not_found' ||
+      code === 'signup_disabled' ||
+      normalized.includes('user not found') ||
+      normalized.includes('account not found') ||
+      normalized.includes('account does not exist') ||
+      normalized.includes('signups not allowed'))
+  ) {
+    return 'Account does not exist, sign up first.';
+  }
   if (action === 'verification' && (normalized.includes('expired') || normalized.includes('invalid'))) {
     return 'That code is incorrect or expired. Check it or request a new one.';
   }

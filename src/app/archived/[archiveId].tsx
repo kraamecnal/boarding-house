@@ -1,21 +1,34 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     Image,
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useBills } from '@/contexts/BillsContext';
+import { useNotifications } from '@/contexts/NotificationsContext';
 import { signedDocumentUrl } from '@/contexts/RoomsContext';
 import { formatRoomLabel } from '@/components/RoomLabel';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
+import {
+  manilaDateFromTimestamp,
+  paymentTimestampForDate,
+  paymentUpdateErrorMessage,
+  todayInManila,
+} from '@/utils/billPayments';
+import { dateFromLocalIso, isValidIsoDate } from '@/utils/meterReadings';
 import { getSupabaseClient } from '@/utils/supabase';
 
 type ArchiveTab = 'info' | 'history';
@@ -87,7 +100,7 @@ function mapBill(row: DbBill): ArchivedBill {
     id: row.bill_id,
     period: row.period_start.slice(0, 7),
     dueDate: row.due_date,
-    paidDate: row.paid_at?.slice(0, 10) ?? null,
+    paidDate: manilaDateFromTimestamp(row.paid_at),
     isPaid: row.is_paid === true || row.paid_at !== null,
     total: Number(row.total_amount),
     items: (row.bill_items ?? []).map((item) => ({
@@ -102,6 +115,8 @@ export default function ArchivedTenantScreen() {
   const params = useLocalSearchParams<{ archiveId: string }>();
   const archiveId = Array.isArray(params.archiveId) ? params.archiveId[0] : params.archiveId;
   const insets = useSafeAreaInsets();
+  const { reload: reloadBills } = useBills();
+  const { reload: reloadNotifications } = useNotifications();
 
   const [tab, setTab] = useState<ArchiveTab>('info');
   const [archive, setArchive] = useState<ArchiveRow | null>(null);
@@ -113,6 +128,12 @@ export default function ArchivedTenantScreen() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [expandedBillId, setExpandedBillId] = useState<string | null>(null);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [paymentBillId, setPaymentBillId] = useState<string | null>(null);
+  const [paymentDate, setPaymentDate] = useState(todayInManila());
+  const [showPaymentDatePicker, setShowPaymentDatePicker] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const paymentInFlight = useRef(false);
 
   useEffect(() => {
     let isCurrent = true;
@@ -173,6 +194,115 @@ export default function ArchivedTenantScreen() {
       isCurrent = false;
     };
   }, [archiveId, loadAttempt]);
+
+  const paymentBill = bills.find((bill) => bill.id === paymentBillId) ?? null;
+
+  const openPaymentModal = (bill: ArchivedBill) => {
+    if (bill.isPaid || paymentInFlight.current) return;
+    setPaymentBillId(bill.id);
+    setPaymentDate(todayInManila());
+    setPaymentError(null);
+    setShowPaymentDatePicker(false);
+  };
+
+  const closePaymentModal = () => {
+    if (paymentInFlight.current) return;
+    setPaymentBillId(null);
+    setPaymentError(null);
+    setShowPaymentDatePicker(false);
+  };
+
+  const updateLocalBillAsPaid = (billId: string, paidAt: string, isPaid: boolean) => {
+    setBills((current) =>
+      current.map((bill) =>
+        bill.id === billId
+          ? { ...bill, paidDate: manilaDateFromTimestamp(paidAt), isPaid }
+          : bill,
+      ),
+    );
+  };
+
+  const recordPayment = async () => {
+    if (!paymentBill || paymentInFlight.current) return;
+
+    const today = todayInManila();
+    if (
+      !isValidIsoDate(paymentDate) ||
+      !archive ||
+      paymentDate < archive.move_in_date ||
+      paymentDate > today
+    ) {
+      setPaymentError('Choose a payment date from the move-in date through today.');
+      return;
+    }
+    if (paymentBill.isPaid) {
+      setPaymentError('This bill is already paid. Its original payment date cannot be changed.');
+      return;
+    }
+
+    paymentInFlight.current = true;
+    setIsSavingPayment(true);
+    setPaymentError(null);
+
+    try {
+      const client = getSupabaseClient();
+      const paidAt = paymentTimestampForDate(paymentDate);
+      const { data, error } = await client
+        .from('monthly_bill')
+        .update({ paid_at: paidAt })
+        .eq('bill_id', paymentBill.id)
+        .is('paid_at', null)
+        .or('is_paid.eq.false,is_paid.is.null')
+        .select('bill_id, paid_at, is_paid')
+        .maybeSingle();
+
+      if (error) throw error;
+      if (data) {
+        updateLocalBillAsPaid(data.bill_id, data.paid_at, data.is_paid === true);
+        setPaymentBillId(null);
+        reloadBills();
+        reloadNotifications();
+        return;
+      }
+
+      const { data: currentBill, error: readError } = await client
+        .from('monthly_bill')
+        .select('bill_id, paid_at, is_paid')
+        .eq('bill_id', paymentBill.id)
+        .maybeSingle();
+      if (readError) throw readError;
+
+      if (
+        currentBill &&
+        (currentBill.is_paid === true || currentBill.paid_at !== null)
+      ) {
+        if (currentBill.paid_at) {
+          updateLocalBillAsPaid(
+            currentBill.bill_id,
+            currentBill.paid_at,
+            true,
+          );
+        }
+        setPaymentBillId(null);
+        reloadBills();
+        reloadNotifications();
+        Alert.alert(
+          'Bill already paid',
+          'This bill was paid elsewhere. Its original payment date was preserved.',
+        );
+        return;
+      }
+
+      setPaymentError(
+        'This bill could not be updated. It may not be available to your account anymore.',
+      );
+    } catch (error: unknown) {
+      setPaymentError(paymentUpdateErrorMessage(error));
+    } finally {
+      paymentInFlight.current = false;
+      setIsSavingPayment(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -284,6 +414,20 @@ export default function ArchivedTenantScreen() {
                       Due {formatShortDate(bill.dueDate)}
                       {bill.paidDate ? ` · Paid ${formatShortDate(bill.paidDate)}` : ''}
                     </Text>
+                    {!bill.isPaid && (
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={isSavingPayment}
+                        onPress={() => openPaymentModal(bill)}
+                        style={({ pressed }) => [
+                          styles.recordPaymentButton,
+                          pressed && styles.recordPaymentButtonPressed,
+                          isSavingPayment && styles.recordPaymentButtonDisabled,
+                        ]}>
+                        <Ionicons name="card-outline" size={18} color="#FFFFFF" />
+                        <Text style={styles.recordPaymentLabel}>Record Payment</Text>
+                      </Pressable>
+                    )}
                   </View>
                 )}
               </View>
@@ -303,6 +447,136 @@ export default function ArchivedTenantScreen() {
             <Ionicons name="close" size={26} color="#FFFFFF" />
           </View>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={paymentBill !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={closePaymentModal}>
+        <View style={styles.paymentOverlay}>
+          <View style={[styles.paymentSheet, { paddingBottom: insets.bottom + 20 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.paymentTitle}>Record Payment</Text>
+
+            {paymentBill && (
+              <>
+                <View style={styles.paymentSummary}>
+                  <View>
+                    <Text style={styles.paymentBillLabel}>
+                      {periodLabel(paymentBill.period)} bill
+                    </Text>
+                    <Text style={styles.paymentAmountLabel}>Total amount</Text>
+                  </View>
+                  <Text style={styles.paymentAmount}>{formatPeso(paymentBill.total)}</Text>
+                </View>
+
+                <Text style={styles.paymentDateLabel}>Payment date</Text>
+                {Platform.OS === 'web' ? (
+                  <TextInput
+                    accessibilityLabel="Payment date"
+                    editable={!isSavingPayment}
+                    maxLength={10}
+                    onChangeText={setPaymentDate}
+                    placeholder="YYYY-MM-DD"
+                    style={styles.paymentDateInput}
+                    value={paymentDate}
+                  />
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={isSavingPayment}
+                    onPress={() => setShowPaymentDatePicker((visible) => !visible)}
+                    style={styles.paymentDateField}>
+                    <Text style={styles.paymentDateValue}>{formatShortDate(paymentDate)}</Text>
+                    <Ionicons name="calendar-outline" size={20} color="#2563EB" />
+                  </Pressable>
+                )}
+
+                {Platform.OS === 'android' && showPaymentDatePicker && archive && (
+                  <DateTimePicker
+                    value={dateFromLocalIso(
+                      isValidIsoDate(paymentDate) ? paymentDate : todayInManila(),
+                    )}
+                    mode="date"
+                    display="default"
+                    minimumDate={dateFromLocalIso(archive.move_in_date)}
+                    maximumDate={dateFromLocalIso(todayInManila())}
+                    onValueChange={(_event, selected) => {
+                      setShowPaymentDatePicker(false);
+                      if (selected) {
+                        const selectedDate = [
+                          selected.getFullYear(),
+                          String(selected.getMonth() + 1).padStart(2, '0'),
+                          String(selected.getDate()).padStart(2, '0'),
+                        ].join('-');
+                        setPaymentDate(selectedDate);
+                        setPaymentError(null);
+                      }
+                    }}
+                    onDismiss={() => setShowPaymentDatePicker(false)}
+                  />
+                )}
+
+                {Platform.OS === 'ios' && showPaymentDatePicker && archive && (
+                  <DateTimePicker
+                    value={dateFromLocalIso(
+                      isValidIsoDate(paymentDate) ? paymentDate : todayInManila(),
+                    )}
+                    mode="date"
+                    display="inline"
+                    minimumDate={dateFromLocalIso(archive.move_in_date)}
+                    maximumDate={dateFromLocalIso(todayInManila())}
+                    onValueChange={(_event, selected) => {
+                      if (selected) {
+                        const selectedDate = [
+                          selected.getFullYear(),
+                          String(selected.getMonth() + 1).padStart(2, '0'),
+                          String(selected.getDate()).padStart(2, '0'),
+                        ].join('-');
+                        setPaymentDate(selectedDate);
+                        setPaymentError(null);
+                      }
+                    }}
+                  />
+                )}
+              </>
+            )}
+
+            {paymentError && (
+              <Text accessibilityLiveRegion="polite" style={styles.paymentError}>
+                {paymentError}
+              </Text>
+            )}
+
+            <View style={styles.paymentActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isSavingPayment}
+                onPress={closePaymentModal}
+                style={[
+                  styles.paymentCancelButton,
+                  isSavingPayment && styles.paymentButtonDisabled,
+                ]}>
+                <Text style={styles.paymentCancelLabel}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isSavingPayment}
+                onPress={() => void recordPayment()}
+                style={[
+                  styles.paymentConfirmButton,
+                  isSavingPayment && styles.paymentButtonDisabled,
+                ]}>
+                {isSavingPayment ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.paymentConfirmLabel}>Mark as Paid</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -477,6 +751,19 @@ const styles = StyleSheet.create({
   breakdownTotalAmount: { color: '#1A2B3C', fontSize: 15, fontWeight: '700' },
   breakdownEmpty: { color: '#6B7280', fontSize: 13 },
   breakdownMeta: { color: '#6B7280', fontSize: 12 },
+  recordPaymentButton: {
+    minHeight: 44,
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+  },
+  recordPaymentButtonPressed: { backgroundColor: '#1D4ED8' },
+  recordPaymentButtonDisabled: { opacity: 0.6 },
+  recordPaymentLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   viewer: {
     flex: 1,
     alignItems: 'center',
@@ -494,4 +781,81 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.18)',
   },
+  paymentOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.52)',
+  },
+  paymentSheet: {
+    gap: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    backgroundColor: '#FFFFFF',
+  },
+  sheetHandle: {
+    width: 42,
+    height: 4,
+    alignSelf: 'center',
+    borderRadius: 2,
+    backgroundColor: '#D0D5DD',
+  },
+  paymentTitle: { color: '#1A2B3C', fontSize: 20, fontWeight: '700' },
+  paymentSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+  },
+  paymentBillLabel: { color: '#1A2B3C', fontSize: 14, fontWeight: '700' },
+  paymentAmountLabel: { marginTop: 3, color: '#667085', fontSize: 12 },
+  paymentAmount: { color: '#1A2B3C', fontSize: 18, fontWeight: '700' },
+  paymentDateLabel: { color: '#344054', fontSize: 14, fontWeight: '600' },
+  paymentDateField: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    borderRadius: 10,
+  },
+  paymentDateInput: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    borderRadius: 10,
+    color: '#1A2B3C',
+    fontSize: 15,
+  },
+  paymentDateValue: { color: '#1A2B3C', fontSize: 15 },
+  paymentError: { color: '#B42318', fontSize: 13, lineHeight: 18 },
+  paymentActions: { flexDirection: 'row', gap: 10 },
+  paymentCancelButton: {
+    minHeight: 46,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  paymentCancelLabel: { color: '#344054', fontSize: 14, fontWeight: '700' },
+  paymentConfirmButton: {
+    minHeight: 46,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+  },
+  paymentConfirmLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  paymentButtonDisabled: { opacity: 0.6 },
 });

@@ -241,6 +241,7 @@ async function uploadDocument(
   if (fileSize > TENANT_DOCUMENT_MAX_BYTES) {
     throw new Error('Tenant documents must be smaller than 5 MB.');
   }
+  const fileBody = await file.arrayBuffer();
   const extension = {
     'image/jpeg': 'jpg',
     'image/png': 'png',
@@ -250,7 +251,7 @@ async function uploadDocument(
   onPathCreated?.(path);
   const { error } = await getSupabaseClient()
     .storage.from(TENANT_DOCUMENT_BUCKET)
-    .upload(path, file, { contentType: image.mimeType, upsert: false });
+    .upload(path, fileBody, { contentType: image.mimeType, upsert: false });
   if (error) {
     const label = kind === 'id' ? 'valid ID' : 'signed agreement';
     throw new Error(`Could not upload the ${label} photo: ${error.message}`);

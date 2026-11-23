@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
 export const unstable_settings = {
-  initialRouteName: 'index', // opens on Boarding Houses
+  anchor: 'index', // opens on Boarding Houses
 };
 
 export default function TabsLayout() {
