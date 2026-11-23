@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { getSupabaseClient } from '@/utils/supabase';
 
 export type NotificationType =
@@ -127,6 +129,87 @@ export async function markAllNotificationsRead(ownerId: string): Promise<void> {
 
 let registeredExpoPushToken: string | null = null;
 let registeredOwnerId: string | null = null;
+const PUSH_TOKEN_STORAGE_KEY = '@inkeeper/registered-push-token';
+
+type StoredPushToken = {
+  ownerId: string;
+  expoPushToken: string;
+};
+
+export async function rememberExpoPushToken(
+  ownerId: string,
+  expoPushToken: string,
+): Promise<void> {
+  registeredExpoPushToken = expoPushToken;
+  registeredOwnerId = ownerId;
+
+  try {
+    await AsyncStorage.setItem(
+      PUSH_TOKEN_STORAGE_KEY,
+      JSON.stringify({ ownerId, expoPushToken } satisfies StoredPushToken),
+    );
+  } catch (error: unknown) {
+    console.error('Could not remember the registered push token on this phone.', error);
+  }
+}
+
+async function loadRememberedExpoPushToken(ownerId: string): Promise<string | null> {
+  if (registeredExpoPushToken && registeredOwnerId === ownerId) {
+    return registeredExpoPushToken;
+  }
+
+  try {
+    const stored = await AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
+    if (!stored) return null;
+    const value = JSON.parse(stored) as Partial<StoredPushToken>;
+    if (
+      value.ownerId === ownerId &&
+      typeof value.expoPushToken === 'string' &&
+      value.expoPushToken.length > 0
+    ) {
+      registeredExpoPushToken = value.expoPushToken;
+      registeredOwnerId = ownerId;
+      return value.expoPushToken;
+    }
+  } catch (error: unknown) {
+    console.error('Could not read the registered push token on this phone.', error);
+  }
+
+  return null;
+}
+
+async function clearRememberedExpoPushToken(ownerId: string, expoPushToken: string): Promise<void> {
+  if (registeredExpoPushToken === expoPushToken && registeredOwnerId === ownerId) {
+    registeredExpoPushToken = null;
+    registeredOwnerId = null;
+  }
+
+  try {
+    const stored = await AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
+    if (!stored) return;
+    const value = JSON.parse(stored) as Partial<StoredPushToken>;
+    if (value.ownerId === ownerId && value.expoPushToken === expoPushToken) {
+      await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+    }
+  } catch (error: unknown) {
+    console.error('Could not clear the registered push token on this phone.', error);
+  }
+}
+
+export async function isExpoPushTokenRegistered(
+  ownerId: string,
+  expoPushToken: string,
+): Promise<boolean> {
+  const { data, error } = await getSupabaseClient()
+    .from('device_push_tokens')
+    .select('expo_push_token')
+    .eq('owner_id', ownerId)
+    .eq('expo_push_token', expoPushToken)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data !== null;
+}
 
 export async function saveExpoPushToken(
   ownerId: string,
@@ -146,20 +229,22 @@ export async function saveExpoPushToken(
     );
 
   if (error) throw error;
-  registeredExpoPushToken = expoPushToken;
-  registeredOwnerId = ownerId;
+  await rememberExpoPushToken(ownerId, expoPushToken);
 }
 
-export async function removeExpoPushToken(ownerId: string): Promise<void> {
-  if (!registeredExpoPushToken || registeredOwnerId !== ownerId) return;
+export async function removeExpoPushToken(
+  ownerId: string,
+  expoPushToken?: string,
+): Promise<void> {
+  const token = expoPushToken ?? (await loadRememberedExpoPushToken(ownerId));
+  if (!token) return;
 
   const { error } = await getSupabaseClient()
     .from('device_push_tokens')
     .delete()
     .eq('owner_id', ownerId)
-    .eq('expo_push_token', registeredExpoPushToken);
+    .eq('expo_push_token', token);
 
   if (error) throw error;
-  registeredExpoPushToken = null;
-  registeredOwnerId = null;
+  await clearRememberedExpoPushToken(ownerId, token);
 }

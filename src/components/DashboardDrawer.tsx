@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import {
@@ -27,6 +28,7 @@ export default function DashboardDrawer({ visible, onClose }: Props) {
   const translateX = useRef(new Animated.Value(-drawerWidth)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const isClosing = useRef(false);
+  const version = Constants.expoConfig?.version ?? 'Unavailable';
 
   useEffect(() => {
     if (!visible) return;
@@ -119,6 +121,8 @@ export default function DashboardDrawer({ visible, onClose }: Props) {
             label="Settings"
             onPress={() => navigateTo('/settings')}
           />
+          <View style={styles.footerSpacer} />
+          <Text style={styles.version}>InKeeper v{version}</Text>
         </Animated.View>
       </View>
     </Modal>
@@ -167,6 +171,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.16,
     shadowRadius: 16,
   },
+  footerSpacer: {
+    flex: 1,
+  },
   title: {
     marginBottom: 20,
     color: DashboardColors.dark,
@@ -188,5 +195,12 @@ const styles = StyleSheet.create({
     color: DashboardColors.dark,
     fontSize: 15,
     fontWeight: '600',
+  },
+  version: {
+    marginBottom: 8,
+    color: DashboardColors.neutral,
+    fontSize: 11,
+    opacity: 0.7,
+    textAlign: 'center',
   },
 });

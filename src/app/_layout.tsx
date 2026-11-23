@@ -84,6 +84,8 @@ function AppNavigator() {
         <Stack.Screen name="auth/recover-payment-password" options={{ title: 'Forgot password?' }} />
         <Stack.Screen name="billing-charges" options={{ title: 'Billing charges' }} />
         <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="about" options={{ title: 'About' }} />
         <Stack.Screen name="tenants" options={{ title: 'Tenants' }} />
         <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
         <Stack.Screen

@@ -34,7 +34,6 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Profile</Text>
       <View style={styles.card}>
         <View style={styles.avatar}>
           <Ionicons color={DashboardColors.primary} name="person" size={30} />
@@ -76,17 +75,6 @@ export default function ProfileScreen() {
         </Text>
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => router.push('/settings')}
-        style={styles.row}>
-        <View style={styles.rowCopy}>
-          <Text style={styles.rowTitle}>About and version</Text>
-          <Text style={styles.rowDescription}>App information and release version</Text>
-        </View>
-        <Ionicons color={DashboardColors.neutral} name="chevron-forward" size={20} />
-      </Pressable>
-
       {signOutError && <Text accessibilityLiveRegion="polite" style={styles.error}>{signOutError}</Text>}
       <Pressable
         accessibilityRole="button"
@@ -118,11 +106,6 @@ const styles = StyleSheet.create({
     padding: 20,
     gap: 18,
     backgroundColor: DashboardColors.white,
-  },
-  title: {
-    color: DashboardColors.dark,
-    fontSize: 26,
-    fontWeight: '700',
   },
   card: {
     alignItems: 'center',

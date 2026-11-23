@@ -67,7 +67,7 @@ To exercise the rollback-only regression fixtures, apply the migration to an iso
 
 Rooms have a permanent monthly meter-reading day (default 15; days beyond a month’s length use that month’s final day). Record the move-in reading on the tenant’s move-in date and a closing reading when ending a tenancy. Scheduled present readings are entered from the Monthly Bill; the database saves the reading and electricity bill item together, using the tenancy rate first and the owner default second. A missing move-in reading or rate never creates an estimated charge. Tenancy boundary readings are required before a tenancy can end, preventing usage from being assigned to a different tenant. Existing manual electricity items and finalized bills remain unchanged. Apply `meter_readings_workflow` and then `automatic_meter_billing` in order before using the updated room, tenant, or billing screens.
 
-The Manage tab shows the dashboard summary. Open the gear menu to visit Billing charges or Profile; the Profile page links to the About and Version information.
+The Manage tab shows the dashboard summary. Open the gear menu to visit Billing Charges, Profile, Tenants, or Settings. Settings is a normal screen, so Android's back action returns to Manage. The drawer shows the installed app version at its bottom. Open About InKeeper from Settings to read the app's About information.
 
 ## Notifications
 
@@ -81,6 +81,10 @@ npx supabase functions deploy send-notification-push --project-ref <project-ref>
 ```
 
 Push delivery requires a development or production native build, granted notification permission, and valid Expo/EAS push credentials for the project. Android remote push is not supported in Expo Go; use a development build to enable it. The app skips push-token/channel initialization in Expo Go while keeping in-app notifications and Realtime updates available, and exposes the limitation in Settings. Push is optional: the notification list and Realtime updates still work when a device has not granted permission. The Edge Function uses the server-side Supabase service-role key and Expo Push Service; neither key nor push credentials belong in the app.
+
+Settings reads Android permission and checks this phone's token in `device_push_tokens` before showing the switch as on. Permission is requested only after the owner turns on **Enable push alerts**. Turning the switch off deletes the current phone token; registration errors leave the switch off with a retry, while an unregister error leaves it on so the screen does not claim a state the backend could not save. A blocked Android permission opens the app's system notification settings instead of showing a prompt that cannot appear.
+
+The registered token is remembered on the phone. Sign out deletes this phone's token before the Supabase session is closed, so alerts for that account are not sent after sign-out. If token cleanup cannot reach the backend, sign-out is not completed and the owner sees a retry message.
 
 To enable secure database-to-function dispatch, create one random webhook secret and set it as an Edge Function secret:
 
@@ -120,9 +124,12 @@ Supabase provides `SUPABASE_URL`; the deployed functions also use the existing s
 After applying the migration and configuring push:
 
 1. Sign in as an owner and open Manage. Confirm the bell opens the list, shows an empty state when appropriate, and asks for push permission only after choosing **Enable push alerts**.
-2. Register a tenant, generate a bill, add its electricity reading, and mark the bill paid. Confirm the corresponding tenant, bill, reading-required, electricity-charge, and paid notifications appear without refreshing.
-3. Use an unfinalized bill due in two days and another due today to check the 8:00 AM owner reminders. Confirm no amount is present and duplicate runs create no second reminder for the same Manila day. Finalized bills must not receive owner reminders.
-4. Mark one notification read and then mark all read. Confirm the unread badge and read styling update immediately and remain correct after reopening Manage.
+2. Allow permission once and confirm the Settings status is **Push notifications enabled.**. Restart the app and confirm the switch remains on.
+3. Turn the switch off and confirm this phone token is removed and future pushes stop. Turn it on again, deny once, then block the permission and confirm the Android settings action appears.
+4. Register a tenant, generate a bill, add its electricity reading, and mark the bill paid. Confirm the corresponding tenant, bill, reading-required, electricity-charge, and paid notifications appear without refreshing.
+5. Use an unfinalized bill due in two days and another due today to check the 8:00 AM owner reminders. Confirm no amount is present and duplicate runs create no second reminder for the same Manila day. Finalized bills must not receive owner reminders.
+6. Mark one notification read and then mark all read. Confirm the unread badge and read styling update immediately and remain correct after reopening Manage.
+7. With push enabled, sign out and confirm the database no longer contains this phone token for that owner. In-app notifications remain available after sign-in or while phone alerts are off.
 5. Sign in as a second owner and attempt to query/update the first owner's notification ID; RLS must return no row and prevent changes.
 6. Save a meter reading and confirm it recalculates without finalizing or emailing. Then use **Finalize & send** with a controlled recipient. Confirm the bill is finalized once, can be resent manually, and a tenant without email returns the no-email result.
 7. Disable or invalidate a device push token and verify in-app notification creation still succeeds. Check Edge Function logs for delivery errors; push failures must not interrupt the primary workflow.

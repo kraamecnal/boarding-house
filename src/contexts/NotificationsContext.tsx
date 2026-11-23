@@ -1,8 +1,11 @@
 import { isRunningInExpoGo } from 'expo';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
+import {
+  AndroidImportance,
+  type NotificationPermissionsStatus,
+} from 'expo-notifications';
 import { useRouter, type Href } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   useCallback,
@@ -13,14 +16,16 @@ import {
   useState,
   type PropsWithChildren,
 } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import {
   loadNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  isExpoPushTokenRegistered,
   removeExpoPushToken,
+  rememberExpoPushToken,
   saveExpoPushToken,
   type AppNotification,
   isNotificationType,
@@ -39,12 +44,11 @@ if (Platform.OS !== 'web') {
   });
 }
 
-type PushPermissionStatus = 'unknown' | 'granted' | 'denied' | 'unsupported';
-
-const PUSH_PERMISSION_PROMPTED_KEY = '@inkeeper/push-permission-prompted';
+export type PushPermissionStatus = 'unknown' | 'granted' | 'denied' | 'blocked' | 'unsupported';
+type PushErrorAction = 'check' | 'enable' | 'disable' | null;
 
 const ANDROID_EXPO_GO_PUSH_MESSAGE =
-  'Android push notifications are unavailable in Expo Go. Use a development or production build; in-app notifications remain available.';
+  'Phone alerts are not available in this test version of InKeeper. In-app alerts still work.';
 
 type NotificationsContextValue = {
   notifications: AppNotification[];
@@ -54,10 +58,15 @@ type NotificationsContextValue = {
   realtimeError: string | null;
   pushError: string | null;
   pushPermissionStatus: PushPermissionStatus;
+  pushEnabled: boolean;
+  isPushStateLoading: boolean;
   reload: () => void;
   markRead: (notificationId: string) => Promise<void>;
   markAllRead: () => Promise<void>;
   enablePushNotifications: () => Promise<void>;
+  disablePushNotifications: () => Promise<void>;
+  refreshPushNotifications: () => Promise<void>;
+  retryPushNotifications: () => Promise<void>;
 };
 
 const NotificationsContext = createContext<NotificationsContextValue | undefined>(undefined);
@@ -93,8 +102,12 @@ export function NotificationsProvider({ children }: PropsWithChildren) {
   const [pushError, setPushError] = useState<string | null>(null);
   const [pushPermissionStatus, setPushPermissionStatus] =
     useState<PushPermissionStatus>('unknown');
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [isPushStateLoading, setIsPushStateLoading] = useState(true);
+  const [pushErrorAction, setPushErrorAction] = useState<PushErrorAction>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const requestId = useRef(0);
+  const pushRequestId = useRef(0);
   const pendingNotificationRoute = useRef<Href | null>(null);
   const pendingNotificationId = useRef<string | null>(null);
 
@@ -170,104 +183,97 @@ export function NotificationsProvider({ children }: PropsWithChildren) {
     };
   }, [ownerId, reload]);
 
-  const registerPushToken = useCallback(
-    async (requestPermission: boolean) => {
-      if (Platform.OS === 'web') {
-        setPushPermissionStatus('unsupported');
-        return;
-      }
+  const getExpoPushToken = useCallback(async () => {
+    const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId;
+    if (!projectId) {
+      throw new Error('Phone alerts are not set up for this app build.');
+    }
+    const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+    return data;
+  }, []);
 
-      if (Platform.OS === 'android' && isRunningInExpoGo()) {
-        setPushPermissionStatus('unsupported');
-        setPushError(ANDROID_EXPO_GO_PUSH_MESSAGE);
-        return;
-      }
+  const prepareAndroidPush = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      setPushPermissionStatus('unsupported');
+      throw new Error('Phone alerts are available on Android only.');
+    }
+    if (isRunningInExpoGo()) {
+      setPushPermissionStatus('unsupported');
+      throw new Error(ANDROID_EXPO_GO_PUSH_MESSAGE);
+    }
+    await Notifications.setNotificationChannelAsync('default', {
+      name: 'InKeeper notifications',
+      importance: AndroidImportance.DEFAULT,
+    });
+  }, []);
 
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-          name: 'InKeeper notifications',
-          importance: Notifications.AndroidImportance.DEFAULT,
-        });
-      }
-
-      let permissions = await Notifications.getPermissionsAsync();
-      if (!permissions.granted && requestPermission) {
-        permissions = await Notifications.requestPermissionsAsync();
-      }
-      if (!permissions.granted) {
-        setPushPermissionStatus('denied');
-        if (requestPermission) {
-          setPushError('Push notification permission was not granted. In-app notifications remain available.');
-        }
-        return;
-      }
-
-      setPushPermissionStatus('granted');
-      setPushError(null);
-      if (!ownerId) return;
-
-      const projectId = Constants.easConfig?.projectId ?? Constants.expoConfig?.extra?.eas?.projectId;
-      if (!projectId) {
-        throw new Error('Expo push notifications need an EAS project ID in the app configuration.');
-      }
-
-      const { data: tokenData } = await Notifications.getExpoPushTokenAsync({ projectId });
-      if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
-      await saveExpoPushToken(
-        ownerId,
-        tokenData,
-        Platform.OS === 'ios' ? 'ios' : 'android',
-      );
-    },
-    [ownerId],
+  const permissionStatus = useCallback(
+    (permissions: NotificationPermissionsStatus): PushPermissionStatus =>
+      permissions.granted ? 'granted' : permissions.canAskAgain ? 'denied' : 'blocked',
+    [],
   );
 
-  useEffect(() => {
-    let active = true;
-    if (Platform.OS === 'web') {
-      setPushPermissionStatus('unsupported');
-      return () => {
-        active = false;
-      };
-    }
+  const refreshPushNotifications = useCallback(async () => {
+    const operationId = ++pushRequestId.current;
+    setIsPushStateLoading(true);
+    setPushError(null);
+    setPushErrorAction(null);
 
-    if (Platform.OS === 'android' && isRunningInExpoGo()) {
-      setPushPermissionStatus('unsupported');
-      setPushError(ANDROID_EXPO_GO_PUSH_MESSAGE);
-      return () => {
-        active = false;
-      };
-    }
-
-    const initializePushNotifications = async () => {
-      try {
-        const alreadyPrompted = await AsyncStorage.getItem(PUSH_PERMISSION_PROMPTED_KEY);
-        if (!active) return;
-
-        if (alreadyPrompted) {
-          const permissions = await Notifications.getPermissionsAsync();
-          if (!active) return;
-          setPushPermissionStatus(permissions.granted ? 'granted' : 'denied');
-          if (permissions.granted && ownerId) await registerPushToken(false);
-          return;
-        }
-
-        await AsyncStorage.setItem(PUSH_PERMISSION_PROMPTED_KEY, 'true');
-        if (active) await registerPushToken(true);
-      } catch (error: unknown) {
-        if (!active) return;
-        setPushError(
-          error instanceof Error ? error.message : 'Could not register this device for push notifications.',
-        );
+    try {
+      if (!ownerId) {
+        setPushPermissionStatus('unknown');
+        setPushEnabled(false);
+        return;
       }
-    };
 
-    void initializePushNotifications();
+      await prepareAndroidPush();
+      const permissions = await Notifications.getPermissionsAsync();
+      if (operationId !== pushRequestId.current) return;
 
-    return () => {
-      active = false;
-    };
-  }, [ownerId, registerPushToken]);
+      setPushPermissionStatus(permissionStatus(permissions));
+      if (!permissions.granted) {
+        setPushEnabled(false);
+        return;
+      }
+
+      const expoPushToken = await getExpoPushToken();
+      const isRegistered = await isExpoPushTokenRegistered(ownerId, expoPushToken);
+      if (operationId !== pushRequestId.current) return;
+
+      if (isRegistered) {
+        await rememberExpoPushToken(ownerId, expoPushToken);
+      }
+      setPushEnabled(isRegistered);
+    } catch (error: unknown) {
+      if (operationId !== pushRequestId.current) return;
+      if (Platform.OS !== 'android') {
+        setPushPermissionStatus('unsupported');
+      }
+      setPushEnabled(false);
+      setPushError(
+        error instanceof Error && error.message === ANDROID_EXPO_GO_PUSH_MESSAGE
+          ? error.message
+          : 'Could not check phone alerts. Check your internet connection and try again.',
+      );
+      setPushErrorAction('check');
+    } finally {
+      if (operationId === pushRequestId.current) setIsPushStateLoading(false);
+    }
+  }, [getExpoPushToken, ownerId, permissionStatus, prepareAndroidPush]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => void refreshPushNotifications(), 0);
+    return () => clearTimeout(timeout);
+  }, [refreshPushNotifications]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && ownerId) {
+        void refreshPushNotifications();
+      }
+    });
+    return () => subscription.remove();
+  }, [ownerId, refreshPushNotifications]);
 
   const markRead = useCallback(
     async (notificationId: string) => {
@@ -303,17 +309,85 @@ export function NotificationsProvider({ children }: PropsWithChildren) {
   }, [ownerId]);
 
   const enablePushNotifications = useCallback(async () => {
+    const operationId = ++pushRequestId.current;
+    setIsPushStateLoading(true);
+    setPushError(null);
+    setPushErrorAction(null);
+
     try {
-      await registerPushToken(true);
+      if (!ownerId) throw new Error('Sign in to turn on phone alerts.');
+      await prepareAndroidPush();
+
+      let permissions = await Notifications.getPermissionsAsync();
+      if (!permissions.granted && permissions.canAskAgain) {
+        permissions = await Notifications.requestPermissionsAsync();
+      }
+      if (operationId !== pushRequestId.current) return;
+
+      setPushPermissionStatus(permissionStatus(permissions));
+      if (!permissions.granted) {
+        setPushEnabled(false);
+        return;
+      }
+
+      const expoPushToken = await getExpoPushToken();
+      await saveExpoPushToken(ownerId, expoPushToken, 'android');
+      if (operationId !== pushRequestId.current) return;
+
+      setPushEnabled(true);
     } catch (error: unknown) {
+      if (operationId !== pushRequestId.current) return;
       const message =
-        error instanceof Error
+        error instanceof Error &&
+        (error.message === ANDROID_EXPO_GO_PUSH_MESSAGE ||
+          error.message === 'Phone alerts are not set up for this app build.')
           ? error.message
-          : 'Could not enable push notifications on this device.';
+          : 'Could not turn on phone alerts. Check your internet connection and try again.';
+      setPushEnabled(false);
       setPushError(message);
-      throw error;
+      setPushErrorAction('enable');
+      throw new Error(message);
+    } finally {
+      if (operationId === pushRequestId.current) setIsPushStateLoading(false);
     }
-  }, [registerPushToken]);
+  }, [getExpoPushToken, ownerId, permissionStatus, prepareAndroidPush]);
+
+  const disablePushNotifications = useCallback(async () => {
+    if (!ownerId) throw new Error('Sign in to change phone alerts.');
+    const operationId = ++pushRequestId.current;
+    setIsPushStateLoading(true);
+    setPushError(null);
+    setPushErrorAction(null);
+
+    try {
+      await removeExpoPushToken(ownerId);
+      if (operationId !== pushRequestId.current) return;
+      setPushEnabled(false);
+    } catch {
+      if (operationId !== pushRequestId.current) return;
+      const message = 'Could not turn off phone alerts. Check your internet connection and try again.';
+      setPushError(message);
+      setPushErrorAction('disable');
+      throw new Error(message);
+    } finally {
+      if (operationId === pushRequestId.current) setIsPushStateLoading(false);
+    }
+  }, [ownerId]);
+
+  const retryPushNotifications = useCallback(async () => {
+    if (pushErrorAction === 'enable') {
+      await enablePushNotifications();
+    } else if (pushErrorAction === 'disable') {
+      await disablePushNotifications();
+    } else {
+      await refreshPushNotifications();
+    }
+  }, [
+    disablePushNotifications,
+    enablePushNotifications,
+    pushErrorAction,
+    refreshPushNotifications,
+  ]);
 
   const responseHandler = useRef<(response: Notifications.NotificationResponse) => void>(() => {});
 
@@ -375,22 +449,32 @@ export function NotificationsProvider({ children }: PropsWithChildren) {
       realtimeError,
       pushError,
       pushPermissionStatus,
+      pushEnabled,
+      isPushStateLoading,
       reload,
       markRead,
       markAllRead,
       enablePushNotifications,
+      disablePushNotifications,
+      refreshPushNotifications,
+      retryPushNotifications,
     }),
     [
       enablePushNotifications,
+      disablePushNotifications,
       isLoading,
+      isPushStateLoading,
       loadError,
       markAllRead,
       markRead,
       notifications,
       pushError,
+      pushEnabled,
       pushPermissionStatus,
       realtimeError,
       reload,
+      refreshPushNotifications,
+      retryPushNotifications,
       unreadCount,
     ],
   );

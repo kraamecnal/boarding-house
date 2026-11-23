@@ -93,7 +93,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
 
   const signOut = useCallback(async () => {
-    if (session?.user.id) await removeExpoPushToken(session.user.id);
+    if (session?.user.id) {
+      try {
+        await removeExpoPushToken(session.user.id);
+      } catch {
+        throw new Error(
+          'Could not turn off phone alerts. Check your internet connection and try signing out again.',
+        );
+      }
+    }
     const { error } = await getSupabaseClient().auth.signOut();
     if (error) throw error;
   }, [session]);
