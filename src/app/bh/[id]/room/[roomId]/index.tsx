@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnimatedButton from '@/components/AnimatedButton';
 import ImageField from '@/components/ImageField';
 import RoomLabel from '@/components/RoomLabel';
+import TenantEditModal from '@/components/TenantEditModal';
 import { useBills } from '@/contexts/BillsContext';
 import { useBoardingHouses } from '@/contexts/BoardingHousesContext';
 import { isOccupied, useRooms } from '@/contexts/RoomsContext';
@@ -78,11 +79,19 @@ export default function RoomDetailScreen() {
   const [meterReadingsError, setMeterReadingsError] = useState<string | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [isEditingTenant, setIsEditingTenant] = useState(false);
+  const [tenantUpdateNotice, setTenantUpdateNotice] = useState<string | null>(null);
   const refreshTenantDocumentRef = useRef(refreshTenantDocument);
 
   useEffect(() => {
     refreshTenantDocumentRef.current = refreshTenantDocument;
   }, [refreshTenantDocument]);
+
+  useEffect(() => {
+    if (!tenantUpdateNotice) return;
+    const timeout = setTimeout(() => setTenantUpdateNotice(null), 4000);
+    return () => clearTimeout(timeout);
+  }, [tenantUpdateNotice]);
 
   const retryDocument = async (kind: TenantDocumentKind, force = false) => {
     if (!force && (documentRetryCount[kind] ?? 0) >= 1) {
@@ -294,6 +303,24 @@ export default function RoomDetailScreen() {
         {tab === 'info' ? (
           <>
             <View style={styles.card}>
+              {tenant && (
+                <View style={styles.tenantCardActionRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit tenant information"
+                    onPress={() => {
+                      setTenantUpdateNotice(null);
+                      setIsEditingTenant(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.editTenantButton,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Ionicons name="pencil" size={15} color="#2563EB" />
+                    <Text style={styles.editTenantLabel}>Edit</Text>
+                  </Pressable>
+                </View>
+              )}
               <InfoRow label="Room" value={room.roomName} />
               <InfoRow label="Status" value={occupied ? 'Occupied' : 'Vacant'} />
               <InfoRow label="Monthly rate" value={`${formatPeso(room.monthlyRate)} / month`} />
@@ -319,6 +346,12 @@ export default function RoomDetailScreen() {
                 </>
               )}
             </View>
+            {tenantUpdateNotice && (
+              <View style={styles.tenantNotice} accessibilityLiveRegion="polite">
+                <Ionicons name="checkmark-circle" size={18} color="#067647" />
+                <Text style={styles.tenantNoticeText}>{tenantUpdateNotice}</Text>
+              </View>
+            )}
 
             {tenant ? (
               <>
@@ -628,6 +661,19 @@ export default function RoomDetailScreen() {
         </View>
       </Modal>
 
+      {isEditingTenant && tenant && (
+        <TenantEditModal
+          key={`${tenant.id}:${tenant.tenancyId}`}
+          roomId={room.id}
+          tenant={tenant}
+          onCancel={() => setIsEditingTenant(false)}
+          onSaved={() => {
+            setIsEditingTenant(false);
+            setTenantUpdateNotice('Tenant information updated.');
+          }}
+        />
+      )}
+
     </View>
   );
 }
@@ -773,6 +819,41 @@ const styles = StyleSheet.create({
   },
   selectedTabLabel: {
     color: '#1A2B3C',
+  },
+  tenantCardActionRow: {
+    alignItems: 'flex-end',
+    marginBottom: -2,
+  },
+  editTenantButton: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 11,
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+  },
+  editTenantLabel: {
+    color: '#2563EB',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  tenantNotice: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 10,
+    backgroundColor: '#F0FDF4',
+  },
+  tenantNoticeText: {
+    color: '#166534',
+    fontSize: 13,
+    fontWeight: '600',
   },
   card: {
     padding: 16,

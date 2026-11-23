@@ -61,6 +61,11 @@ export type NewTenantInput = {
 };
 export type TenantChargeOverrides = Partial<Record<ChargeType, string>>;
 type EditRoomInput = Pick<Room, 'roomName' | 'monthlyRate'>;
+export type EditTenantInput = {
+  name: string;
+  email: string;
+  contactNumber: string;
+};
 
 type RoomRow = {
   room_id: string;
@@ -106,6 +111,7 @@ type ContextValue = {
   isRoomNameTaken: (boardingHouseId: string, roomName: string) => boolean;
   addRoom: (input: NewRoomInput) => Promise<void>;
   updateRoom: (id: string, input: EditRoomInput) => Promise<Room>;
+  updateTenant: (roomId: string, input: EditTenantInput) => Promise<Tenant>;
   assignTenant: (
     roomId: string,
     input: NewTenantInput,
@@ -560,6 +566,84 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
           current.map((room) => (room.id === id ? updatedRoom : room)),
         );
         return updatedRoom;
+      },
+      updateTenant: async (roomId, input) => {
+        if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
+        const room = rooms.find((item) => item.id === roomId);
+        if (!room || !isOccupied(room)) {
+          throw new Error('This room no longer has an active tenant.');
+        }
+
+        const name = input.name.trim();
+        const email = input.email.trim();
+        const contactNumber = input.contactNumber.trim();
+        if (!name) throw new Error('Enter a tenant name.');
+
+        const client = getSupabaseClient();
+        const { data: tenancy, error: tenancyError } = await client
+          .from('tenancy')
+          .select('tenant_id')
+          .eq('tenancy_id', room.tenant.tenancyId)
+          .eq('owner_id', ownerId)
+          .in('status', ['active', 'scheduled'])
+          .single();
+        if (tenancyError) {
+          if (tenancyError.code === 'PGRST116') {
+            throw new Error('This tenancy is no longer active and cannot be edited.');
+          }
+          throw tenancyError;
+        }
+        if (!tenancy?.tenant_id) {
+          throw new Error('The tenant record could not be identified.');
+        }
+
+        const currentName = `${room.tenant.firstName} ${room.tenant.lastName}`.trim();
+        const changes: {
+          name?: string;
+          contact_number?: string | null;
+          email_address?: string | null;
+        } = {};
+        if (name !== currentName) changes.name = name;
+        if (contactNumber !== room.tenant.contactNumber.trim()) {
+          changes.contact_number = contactNumber || null;
+        }
+        if (email !== room.tenant.email.trim()) {
+          changes.email_address = email || null;
+        }
+        if (Object.keys(changes).length === 0) return room.tenant;
+
+        const { data, error } = await client
+          .from('tenants')
+          .update(changes)
+          .eq('tenant_id', tenancy.tenant_id)
+          .eq('owner_id', ownerId)
+          .select('tenant_id, name, contact_number, email_address')
+          .single();
+        if (error) {
+          if (error.code === 'PGRST116') {
+            throw new Error('The tenant could not be updated. It may not exist or be authorized.');
+          }
+          throw error;
+        }
+        if (!data) throw new Error('The tenant update returned no row.');
+
+        const split = splitName(data.name);
+        const updatedTenant: Tenant = {
+          ...room.tenant,
+          id: data.tenant_id,
+          firstName: split.firstName,
+          lastName: split.lastName,
+          email: data.email_address ?? '',
+          contactNumber: data.contact_number ?? '',
+        };
+        setRooms((current) =>
+          current.map((item) =>
+            item.id === roomId && isOccupied(item)
+              ? { ...item, tenant: updatedTenant }
+              : item,
+          ),
+        );
+        return updatedTenant;
       },
       assignTenant: async (roomId, input, customCharges = {}, onDocumentProgress) => {
         if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
