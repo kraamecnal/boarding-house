@@ -1,22 +1,18 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 
 export default function AboutScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.heading}>About InKeeper</Text>
-        <Text style={styles.body}>
-          InKeeper helps boarding-house owners organize their properties, keep tenant and room
-          details together, and track upcoming and unpaid bills.
-        </Text>
-      </View>
-      <View style={styles.card}>
-        <Text style={styles.heading}>Made for everyday management</Text>
-        <Text style={styles.body}>
-          Use Boarding Houses to register properties and tenants, and Manage to review billing due
-          dates and outstanding balances.
-        </Text>
-      </View>
+      <Text style={styles.heading}>About InKeeper</Text>
+      <Text style={styles.body}>
+        InKeeper helps boarding-house owners organize their properties, keep tenant and room
+        details together, and track upcoming and unpaid bills.
+      </Text>
+      <Text style={[styles.heading, styles.secondHeading]}>Made for everyday management</Text>
+      <Text style={styles.body}>
+        Use Boarding Houses to register properties and tenants, and Manage to review billing due
+        dates and outstanding balances.
+      </Text>
     </ScrollView>
   );
 }
@@ -24,22 +20,18 @@ export default function AboutScreen() {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    padding: 20,
-    gap: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 32,
     backgroundColor: '#F8F9FA',
   },
-  card: {
-    padding: 20,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-  },
   heading: {
+    marginBottom: 10,
     color: '#1E293B',
     fontSize: 18,
     fontWeight: '700',
+  },
+  secondHeading: {
+    marginTop: 36,
   },
   body: {
     color: '#64748B',
