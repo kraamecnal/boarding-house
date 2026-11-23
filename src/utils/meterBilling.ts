@@ -36,6 +36,35 @@ export type BillElectricityRollForward = {
   status: 'pending' | 'completed';
 };
 
+export type BillMeterCorrectionContext = {
+  billId: string;
+  eligible: boolean;
+  reason: string | null;
+  readingId: string | null;
+  readingAt: string | null;
+  oldValue: number | null;
+  previousValue: number | null;
+  usage: number | null;
+  rate: number | null;
+  electricityCharge: number | null;
+  totalAmount: number;
+};
+
+export type CorrectedBillMeterReading = {
+  corrected: true;
+  alreadyApplied: boolean;
+  correctionId: string;
+  billId: string;
+  readingId: string;
+  oldValue: number;
+  newValue: number;
+  correctedAt: string;
+  usage: number;
+  rate: number;
+  electricityCharge: number;
+  totalAmount: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -162,10 +191,119 @@ export async function cancelBillElectricityRollForward(sourceBillId: string): Pr
   if (error) throw error;
 }
 
-export function billMeterErrorMessage(error: unknown, fallback: string): string {
-  if (!(error instanceof Error)) return fallback;
+export async function getBillMeterCorrectionContext(
+  billId: string,
+): Promise<BillMeterCorrectionContext> {
+  const { data, error } = await getSupabaseClient().rpc(
+    'get_bill_meter_reading_correction_context',
+    { p_bill_id: billId },
+  );
+  if (error) throw error;
+  const value: unknown = data;
+  if (
+    !isRecord(value) ||
+    typeof value.billId !== 'string' ||
+    typeof value.eligible !== 'boolean' ||
+    (value.reason !== null && typeof value.reason !== 'string') ||
+    (value.readingId !== null && typeof value.readingId !== 'string') ||
+    (value.readingAt !== null && typeof value.readingAt !== 'string') ||
+    (value.oldValue !== null && typeof value.oldValue !== 'number') ||
+    (value.previousValue !== null && typeof value.previousValue !== 'number') ||
+    (value.usage !== null && typeof value.usage !== 'number') ||
+    (value.rate !== null && typeof value.rate !== 'number') ||
+    (value.electricityCharge !== null && typeof value.electricityCharge !== 'number') ||
+    typeof value.totalAmount !== 'number'
+  ) {
+    throw new Error('The bill reading correction details could not be loaded.');
+  }
 
-  const message = error.message.toLowerCase();
+  return {
+    billId: value.billId,
+    eligible: value.eligible,
+    reason: value.reason,
+    readingId: value.readingId,
+    readingAt: value.readingAt,
+    oldValue: value.oldValue,
+    previousValue: value.previousValue,
+    usage: value.usage,
+    rate: value.rate,
+    electricityCharge: value.electricityCharge,
+    totalAmount: value.totalAmount,
+  };
+}
+
+export async function correctBillMeterReading(
+  billId: string,
+  newReadingValue: number,
+  requestId: string,
+): Promise<CorrectedBillMeterReading> {
+  const { data, error } = await getSupabaseClient().rpc('correct_bill_meter_reading', {
+    p_bill_id: billId,
+    p_new_reading_value: newReadingValue,
+    p_request_id: requestId,
+  });
+  if (error) throw error;
+  const value: unknown = data;
+  if (
+    !isRecord(value) ||
+    value.corrected !== true ||
+    typeof value.alreadyApplied !== 'boolean' ||
+    typeof value.correctionId !== 'string' ||
+    typeof value.billId !== 'string' ||
+    typeof value.readingId !== 'string' ||
+    typeof value.oldValue !== 'number' ||
+    typeof value.newValue !== 'number' ||
+    typeof value.correctedAt !== 'string' ||
+    typeof value.usage !== 'number' ||
+    typeof value.rate !== 'number' ||
+    typeof value.electricityCharge !== 'number' ||
+    typeof value.totalAmount !== 'number'
+  ) {
+    throw new Error('The meter reading correction did not return a complete result.');
+  }
+
+  return {
+    corrected: true,
+    alreadyApplied: value.alreadyApplied,
+    correctionId: value.correctionId,
+    billId: value.billId,
+    readingId: value.readingId,
+    oldValue: value.oldValue,
+    newValue: value.newValue,
+    correctedAt: value.correctedAt,
+    usage: value.usage,
+    rate: value.rate,
+    electricityCharge: value.electricityCharge,
+    totalAmount: value.totalAmount,
+  };
+}
+
+export function billMeterErrorMessage(error: unknown, fallback: string): string {
+  if (!isRecord(error)) return fallback;
+
+  const code = typeof error.code === 'string' ? error.code : '';
+  const codeMessages: Record<string, string> = {
+    IK001: 'This bill is finalized and can no longer be changed.',
+    IK002: 'This bill is paid, so the reading cannot be changed.',
+    IK003: 'A later reading exists. Only the latest reading can be corrected.',
+    IK004: 'This reading is part of a carry-forward and cannot be changed.',
+    IK005: 'The tenant’s move-in reading cannot be changed.',
+    IK006: 'The initial meter reading cannot be changed.',
+    IK007: 'Only an active tenant’s bill reading can be corrected.',
+    IK008: 'Enter a valid nonnegative meter reading.',
+    IK009: 'The new reading cannot be lower than the previous reading.',
+    IK010: 'You are not allowed to correct this bill reading.',
+    IK011: 'The bill meter reading could not be verified. No changes were made.',
+    IK012: 'This meter reading is already included on another bill, so it cannot be added again.',
+    IK014: 'Enter a different meter reading.',
+    IK015: 'A different previous reading exists, so this bill cannot be corrected.',
+    IK00C: 'Could not start this correction. Please reopen the bill and try again.',
+    IK00D: 'This correction request was already used for a different change. Reopen the bill and try again.',
+  };
+  if (codeMessages[code]) return codeMessages[code];
+
+  const rawMessage = typeof error.message === 'string' ? error.message : '';
+  const message = rawMessage.toLowerCase();
   if (
     message.includes('reading date must be later than the previous reading') ||
     message.includes('current reading must be later')
@@ -205,5 +343,5 @@ export function billMeterErrorMessage(error: unknown, fallback: string): string 
   if (message.includes('issued or paid bill cannot be changed')) {
     return 'An issued or paid bill cannot be changed by this action. A separate adjustment is needed.';
   }
-  return error.message;
+  return rawMessage || fallback;
 }

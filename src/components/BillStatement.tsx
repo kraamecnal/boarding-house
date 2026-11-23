@@ -38,6 +38,8 @@ type Props = {
   lateReadingDate: string | null;
   isCarryingForward: boolean;
   isCancellingCarryForward: boolean;
+  canCorrectMeterReading: boolean;
+  correctionCheckError: string | null;
   onChangeMeterReading: (text: string) => void;
   onSelectLateReadingDate: (date: string | null) => void;
   onStartLateReading: () => void;
@@ -45,6 +47,7 @@ type Props = {
   onCarryForward: () => void;
   onCancelCarryForward: () => void;
   onSaveMeterReading: () => void;
+  onCorrectMeterReading: () => void;
   onChangeStatus: (status: BillStatus) => void;
 };
 
@@ -61,6 +64,8 @@ export default function BillStatement({
   lateReadingDate,
   isCarryingForward,
   isCancellingCarryForward,
+  canCorrectMeterReading,
+  correctionCheckError,
   onChangeMeterReading,
   onSelectLateReadingDate,
   onStartLateReading,
@@ -68,6 +73,7 @@ export default function BillStatement({
   onCarryForward,
   onCancelCarryForward,
   onSaveMeterReading,
+  onCorrectMeterReading,
   onChangeStatus,
 }: Props) {
   const [showLateReadingDatePicker, setShowLateReadingDatePicker] = useState(false);
@@ -421,6 +427,29 @@ export default function BillStatement({
                       label="Present Reading"
                       value={`${meterContext.currentReading.value.toLocaleString()} kWh`}
                     />
+                    {canCorrectMeterReading && (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={onCorrectMeterReading}
+                        style={styles.correctReadingButton}>
+                        <Text style={styles.correctReadingLabel}>Correct reading</Text>
+                      </Pressable>
+                    )}
+                    {correctionCheckError && (
+                      <>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: true }}
+                          disabled
+                          style={[
+                            styles.correctReadingButton,
+                            styles.correctReadingButtonDisabled,
+                          ]}>
+                          <Text style={styles.correctReadingLabel}>Correct reading</Text>
+                        </Pressable>
+                        <Text style={styles.meterError}>{correctionCheckError}</Text>
+                      </>
+                    )}
                     <Line
                       label="Electricity Consumed"
                       value={`${(
@@ -870,6 +899,24 @@ const styles = StyleSheet.create({
   },
   meterButtonDisabled: {
     opacity: 0.6,
+  },
+  correctReadingButton: {
+    alignSelf: 'flex-end',
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#BFD3EE',
+    borderRadius: 8,
+    backgroundColor: '#EFF6FF',
+  },
+  correctReadingButtonDisabled: {
+    opacity: 0.55,
+  },
+  correctReadingLabel: {
+    color: '#1E3A8A',
+    fontSize: 12,
+    fontWeight: '700',
   },
   meterButtonLabel: {
     color: '#FFFFFF',

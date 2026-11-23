@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import BillStatement from '@/components/BillStatement';
+import CorrectReadingModal from '@/components/CorrectReadingModal';
 import PasswordPromptModal from '@/components/PasswordPromptModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBills, type BillStatus } from '@/contexts/BillsContext';
@@ -32,8 +33,11 @@ import {
   billMeterErrorMessage,
   cancelBillElectricityRollForward,
   carryForwardBillElectricity,
+  correctBillMeterReading,
+  getBillMeterCorrectionContext,
   getBillMeterContext,
   saveBillMeterReading,
+  type BillMeterCorrectionContext,
   type BillMeterContext,
 } from '@/utils/meterBilling';
 import {
@@ -47,6 +51,10 @@ import {
   parseMeterReadingInput,
   sanitizeMeterReadingInput,
 } from '@/utils/meterReadings';
+
+function newCorrectionRequestId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
 
 export default function TenantBillScreen() {
   const params = useLocalSearchParams<{ roomId: string; period?: string }>();
@@ -90,6 +98,11 @@ export default function TenantBillScreen() {
   const [isResending, setIsResending] = useState(false);
   const [deliveryResult, setDeliveryResult] = useState<BillDeliveryResult | null>(null);
   const deliveryInFlight = useRef(false);
+  const [correctionContext, setCorrectionContext] =
+    useState<BillMeterCorrectionContext | null>(null);
+  const [correctionCheckError, setCorrectionCheckError] = useState<string | null>(null);
+  const [correctionModalVisible, setCorrectionModalVisible] = useState(false);
+  const [correctionRequestId, setCorrectionRequestId] = useState('');
 
   useEffect(() => {
     let isCurrent = true;
@@ -144,9 +157,52 @@ export default function TenantBillScreen() {
     };
   }, [isLateReadingMode, lateReadingDate, meterContextAttempt, period, record?.billId]);
 
+  const hasMeteredElectricity = Boolean(
+    record?.items.some((item) => item.itemType === 'electricity'),
+  );
+
+  useEffect(() => {
+    let isCurrent = true;
+    const billId = record?.billId;
+    if (!billId || !hasMeteredElectricity) {
+      setCorrectionContext(null);
+      setCorrectionCheckError(null);
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    setCorrectionContext(null);
+    setCorrectionCheckError(null);
+    void getBillMeterCorrectionContext(billId)
+      .then((context) => {
+        if (isCurrent) setCorrectionContext(context);
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent) return;
+        setCorrectionCheckError(
+          error instanceof Error
+            ? error.message
+            : 'Could not check if this reading can be corrected.',
+        );
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [
+    hasMeteredElectricity,
+    meterContextAttempt,
+    record?.billId,
+    record?.electricityRollForwardToBillId,
+    record?.isFinalized,
+    record?.status,
+  ]);
+
   useFocusEffect(
     useCallback(() => {
       reload();
+      setMeterContextAttempt((attempt) => attempt + 1);
     }, [reload]),
   );
 
@@ -227,6 +283,41 @@ export default function TenantBillScreen() {
       );
     } finally {
       setIsSavingMeterReading(false);
+    }
+  };
+
+  const openCorrection = () => {
+    if (
+      !correctionContext?.eligible ||
+      correctionContext.billId !== record.billId
+    ) return;
+    setCorrectionRequestId(newCorrectionRequestId());
+    setCorrectionModalVisible(true);
+  };
+
+  const handleSaveCorrection = async (newValue: number) => {
+    if (!record.billId || !correctionRequestId) {
+      throw new Error('Could not start this meter reading correction. Please try again.');
+    }
+    try {
+      await correctBillMeterReading(record.billId, newValue, correctionRequestId);
+      setCorrectionModalVisible(false);
+      setMeterContextAttempt((attempt) => attempt + 1);
+      reload();
+      Alert.alert(
+        'Reading corrected',
+        'The meter reading and bill total have been updated.',
+      );
+    } catch (error: unknown) {
+      if (__DEV__) {
+        console.error('[BillCorrection] Failed to save meter reading correction.', error);
+      }
+      throw new Error(
+        billMeterErrorMessage(
+          error,
+          'Could not save this meter reading correction. Please try again.',
+        ),
+      );
     }
   };
 
@@ -507,6 +598,11 @@ export default function TenantBillScreen() {
           lateReadingDate={lateReadingDate}
           isCarryingForward={isCarryingForward}
           isCancellingCarryForward={isCancellingCarryForward}
+          canCorrectMeterReading={
+            correctionContext?.eligible === true &&
+            correctionContext.billId === record.billId
+          }
+          correctionCheckError={correctionCheckError}
           onChangeMeterReading={(text) => setMeterReadingValue(sanitizeMeterReadingInput(text))}
           onSelectLateReadingDate={setLateReadingDate}
           onStartLateReading={() => {
@@ -521,6 +617,7 @@ export default function TenantBillScreen() {
           onCarryForward={confirmCarryForward}
           onCancelCarryForward={handleCancelCarryForward}
           onSaveMeterReading={() => void handleSaveMeterReading()}
+          onCorrectMeterReading={openCorrection}
           onChangeStatus={handleChangeStatus}
         />
 
@@ -586,6 +683,24 @@ export default function TenantBillScreen() {
           onVerified={handlePasswordVerified}
         />
       )}
+      {correctionModalVisible &&
+        correctionContext &&
+        correctionContext.billId === record.billId &&
+        correctionContext.oldValue !== null &&
+        correctionContext.previousValue !== null &&
+        correctionContext.rate !== null &&
+        correctionContext.electricityCharge !== null && (
+          <CorrectReadingModal
+            visible
+            oldValue={correctionContext.oldValue}
+            previousValue={correctionContext.previousValue}
+            rate={correctionContext.rate}
+            currentElectricityCharge={correctionContext.electricityCharge}
+            currentTotal={correctionContext.totalAmount}
+            onCancel={() => setCorrectionModalVisible(false)}
+            onSave={handleSaveCorrection}
+          />
+        )}
     </KeyboardAvoidingView>
   );
 }
