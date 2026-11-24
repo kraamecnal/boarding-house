@@ -21,6 +21,11 @@ import { useBills } from '@/contexts/BillsContext';
 import { useNotifications } from '@/contexts/NotificationsContext';
 import { signedDocumentUrl } from '@/contexts/RoomsContext';
 import { formatRoomLabel } from '@/components/RoomLabel';
+import {
+  billDeliveryMessage,
+  finalizeAndSendBill,
+  resendFinalBill,
+} from '@/utils/billDelivery';
 import { formatPeso, formatShortDate, periodLabel } from '@/utils/billing';
 import {
   manilaDateFromTimestamp,
@@ -61,7 +66,9 @@ type DbBillItem = {
 type DbBill = {
   bill_id: string;
   period_start: string;
+  period_end: string;
   due_date: string;
+  billed_at: string | null;
   total_amount: number;
   paid_at: string | null;
   is_paid: boolean | null;
@@ -71,10 +78,13 @@ type DbBill = {
 type ArchivedBill = {
   id: string;
   period: string;
+  periodEnd: string;
   dueDate: string;
+  isFinalized: boolean;
   paidDate: string | null;
   isPaid: boolean;
   total: number;
+  hasElectricityResult: boolean;
   items: { id: string; label: string; amount: number }[];
 };
 
@@ -99,10 +109,19 @@ function mapBill(row: DbBill): ArchivedBill {
   return {
     id: row.bill_id,
     period: row.period_start.slice(0, 7),
+    periodEnd: row.period_end,
     dueDate: row.due_date,
+    isFinalized: row.billed_at !== null,
     paidDate: manilaDateFromTimestamp(row.paid_at),
     isPaid: row.is_paid === true || row.paid_at !== null,
     total: Number(row.total_amount),
+    hasElectricityResult: (row.bill_items ?? []).some(
+      (item) =>
+        item.item_type === 'electricity' ||
+        (item.item_type === 'adjustment' &&
+          (item.description === 'Electricity' ||
+            item.description === 'Electricity not charged')),
+    ),
     items: (row.bill_items ?? []).map((item) => ({
       id: item.bill_item_id,
       label: itemLabel(item),
@@ -133,7 +152,9 @@ export default function ArchivedTenantScreen() {
   const [showPaymentDatePicker, setShowPaymentDatePicker] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [deliveryBillId, setDeliveryBillId] = useState<string | null>(null);
   const paymentInFlight = useRef(false);
+  const deliveryInFlight = useRef(false);
 
   useEffect(() => {
     let isCurrent = true;
@@ -160,7 +181,7 @@ export default function ArchivedTenantScreen() {
           const { data: billData, error: billError } = await client
             .from('monthly_bill')
             .select(
-              'bill_id, period_start, due_date, total_amount, paid_at, is_paid, bill_items(bill_item_id,item_type,description,quantity,unit_price,amount)',
+              'bill_id, period_start, period_end, due_date, billed_at, total_amount, paid_at, is_paid, bill_items(bill_item_id,item_type,description,quantity,unit_price,amount)',
             )
             .eq('tenancy_id', row.tenancy_id)
             .order('period_start', { ascending: false });
@@ -219,6 +240,57 @@ export default function ArchivedTenantScreen() {
           ? { ...bill, paidDate: manilaDateFromTimestamp(paidAt), isPaid }
           : bill,
       ),
+    );
+  };
+
+  const deliverBill = async (bill: ArchivedBill, action: 'finalize' | 'resend') => {
+    if (deliveryInFlight.current) return;
+    deliveryInFlight.current = true;
+    setDeliveryBillId(bill.id);
+    try {
+      const result =
+        action === 'finalize'
+          ? await finalizeAndSendBill(bill.id)
+          : await resendFinalBill(bill.id);
+      setLoadAttempt((attempt) => attempt + 1);
+      reloadBills();
+      reloadNotifications();
+      Alert.alert(
+        action === 'finalize' ? 'Bill finalized' : 'Bill resend result',
+        billDeliveryMessage(result),
+      );
+    } catch (error: unknown) {
+      Alert.alert(
+        action === 'finalize' ? 'Could not finalize bill' : 'Could not resend bill',
+        errorMessage(error, 'Please try again.'),
+      );
+    } finally {
+      deliveryInFlight.current = false;
+      setDeliveryBillId(null);
+    }
+  };
+
+  const confirmFinalize = (bill: ArchivedBill) => {
+    if (!archive || bill.isFinalized || bill.isPaid || !bill.hasElectricityResult) return;
+    Alert.alert(
+      'Finalize & send this bill?',
+      `Recipient: ${archive.email_address?.trim() || 'No email on file'}\nTotal: PHP ${bill.total.toFixed(2)}\n\nAfter finalization, bill items cannot be changed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Finalize & Send', onPress: () => void deliverBill(bill, 'finalize') },
+      ],
+    );
+  };
+
+  const confirmResend = (bill: ArchivedBill) => {
+    if (!archive || !bill.isFinalized) return;
+    Alert.alert(
+      'Resend final bill?',
+      `Recipient: ${archive.email_address?.trim() || 'No email on file'}\nTotal: PHP ${bill.total.toFixed(2)}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Resend', onPress: () => void deliverBill(bill, 'resend') },
+      ],
     );
   };
 
@@ -414,6 +486,50 @@ export default function ArchivedTenantScreen() {
                       Due {formatShortDate(bill.dueDate)}
                       {bill.paidDate ? ` · Paid ${formatShortDate(bill.paidDate)}` : ''}
                     </Text>
+                    {!bill.isFinalized && !bill.isPaid && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{
+                          disabled:
+                            deliveryBillId === bill.id || !bill.hasElectricityResult,
+                        }}
+                        disabled={deliveryBillId === bill.id || !bill.hasElectricityResult}
+                        onPress={() => confirmFinalize(bill)}
+                        style={[
+                          styles.deliveryButton,
+                          (deliveryBillId === bill.id || !bill.hasElectricityResult) &&
+                            styles.deliveryButtonDisabled,
+                        ]}>
+                        {deliveryBillId === bill.id ? (
+                          <ActivityIndicator color="#FFFFFF" size="small" />
+                        ) : (
+                          <>
+                            <Ionicons name="mail-outline" size={18} color="#FFFFFF" />
+                            <Text style={styles.deliveryLabel}>Finalize & send</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    )}
+                    {bill.isFinalized && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ disabled: deliveryBillId === bill.id }}
+                        disabled={deliveryBillId === bill.id}
+                        onPress={() => confirmResend(bill)}
+                        style={[
+                          styles.resendButton,
+                          deliveryBillId === bill.id && styles.deliveryButtonDisabled,
+                        ]}>
+                        {deliveryBillId === bill.id ? (
+                          <ActivityIndicator color="#1E3A8A" size="small" />
+                        ) : (
+                          <>
+                            <Ionicons name="refresh-outline" size={18} color="#1E3A8A" />
+                            <Text style={styles.resendLabel}>Resend final bill</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    )}
                     {!bill.isPaid && (
                       <Pressable
                         accessibilityRole="button"
@@ -602,6 +718,19 @@ function SectionTab({
   );
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
@@ -764,6 +893,31 @@ const styles = StyleSheet.create({
   recordPaymentButtonPressed: { backgroundColor: '#1D4ED8' },
   recordPaymentButtonDisabled: { opacity: 0.6 },
   recordPaymentLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  deliveryButton: {
+    minHeight: 44,
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 10,
+    backgroundColor: '#1E3A8A',
+  },
+  deliveryLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  resendButton: {
+    minHeight: 44,
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#B9C5F2',
+    borderRadius: 10,
+    backgroundColor: '#EFF4FF',
+  },
+  resendLabel: { color: '#1E3A8A', fontSize: 14, fontWeight: '700' },
+  deliveryButtonDisabled: { opacity: 0.6 },
   viewer: {
     flex: 1,
     alignItems: 'center',

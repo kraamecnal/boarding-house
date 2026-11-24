@@ -3,6 +3,7 @@ import { createContext, ReactNode, useContext, useEffect, useMemo, useState } fr
 
 import { useAuth } from '@/contexts/AuthContext';
 import { CHARGES, type ChargeType } from '@/data/charges';
+import type { MoveOutInput } from '@/components/MoveOutModal';
 import {
   LEGACY_TENANT_DOCUMENT_BUCKET,
   TENANT_DOCUMENT_BUCKET,
@@ -128,8 +129,7 @@ type ContextValue = {
     image: TenantDocumentImage,
   ) => Promise<string | null>;
   removeRoom: (id: string) => Promise<void>;
-  /** Moves the current tenant (and their bill history) to Archived and frees the room. */
-  archiveTenant: (roomId: string) => Promise<void>;
+  archiveTenant: (roomId: string, input: MoveOutInput) => Promise<void>;
 };
 
 export function isOccupied(room: Room): room is OccupiedRoom {
@@ -857,12 +857,19 @@ export function RoomsProvider({ children }: { children: ReactNode }) {
         if (error) throw error;
         setRooms((current) => current.filter((room) => room.id !== id));
       },
-      archiveTenant: async (roomId) => {
+      archiveTenant: async (roomId, input) => {
         const room = rooms.find((item) => item.id === roomId);
         if (!room || !isOccupied(room)) throw new Error('This room has no tenant to archive.');
+        if (room.tenant.tenancyId !== input.tenancyId) {
+          throw new Error('The tenant changed. Reopen the move-out form and try again.');
+        }
 
-        const { error } = await getSupabaseClient().rpc('archive_tenancy', {
+        const { error } = await getSupabaseClient().rpc('archive_tenancy_with_move_out', {
           p_tenancy_id: room.tenant.tenancyId,
+          p_move_out_date: input.moveOutDate,
+          p_electricity_option: input.electricityOption,
+          p_reading_value: input.readingValue,
+          p_reading_at: input.readingAt,
         });
         if (error) throw error;
 

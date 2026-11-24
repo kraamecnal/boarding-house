@@ -27,7 +27,7 @@ import type {
   TenantDocumentImage,
   TenantDocumentProgressState,
 } from '@/data/tenantDocuments';
-import { formatPeso, sanitizeAmountInput } from '@/utils/billing';
+import { formatPeso, formatShortDate, sanitizeAmountInput } from '@/utils/billing';
 import { parseMeterReadingInput, sanitizeMeterReadingInput } from '@/utils/meterReadings';
 import { getSupabaseClient } from '@/utils/supabase';
 
@@ -276,7 +276,7 @@ export default function RegisterTenantScreen() {
     if (availableFromDate && toIsoDate(startDate) < availableFromDate) {
       return Alert.alert(
         'Move-in date overlaps the previous tenancy',
-        `This room was occupied until ${availableFromDate}. Choose that date or later. If the previous tenant actually left earlier, correct the archived tenancy's move-out date first.`,
+        `This room was occupied until ${formatShortDate(availableFromDate)}. Choose a start date on or after it.`,
       );
     }
     if (isLoadingOpeningMeterReading) {
@@ -361,7 +361,9 @@ export default function RegisterTenantScreen() {
           : message.includes('The existing reading on the move-in date does not match')
             ? 'A different meter reading is already saved for this move-in date. Use the room’s existing handoff reading to register this tenant.'
           : message.includes('no_overlapping_tenancies')
-            ? 'This move-in date overlaps the previous tenancy. The new tenancy must start on or after the previous move-out date.'
+            ? `This room was occupied until ${
+                availableFromDate ? formatShortDate(availableFromDate) : 'the previous move-out date'
+              }. Choose a start date on or after it.`
           : message,
       );
     } finally {
@@ -530,8 +532,8 @@ export default function RegisterTenantScreen() {
         </Pressable>
         {availableFromDate && (
           <Text style={styles.readingHelper}>
-            This room is available from {availableFromDate}. If the previous tenant left earlier,
-            correct that tenancy&apos;s move-out date before registering a replacement.
+            This room was occupied until {formatShortDate(availableFromDate)}. Choose a start date
+            on or after it.
           </Text>
         )}
 

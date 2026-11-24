@@ -3,6 +3,7 @@ import type { BillItem } from '@/contexts/BillsContext';
 import type { OccupiedRoom } from '@/contexts/RoomsContext';
 import { formatRoomLabel } from '@/components/RoomLabel';
 import { FIXED_COSTS_AMOUNT, FIXED_COSTS_LABEL, PAYMENT_REMINDER } from '@/data/billingConfig';
+import { todayInManila } from '@/utils/manilaDate';
 
 const MONTHS_LONG = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -12,8 +13,7 @@ const MONTHS_LONG = [
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return todayInManila();
 }
 
 export function currentPeriod(): string {

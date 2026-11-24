@@ -147,6 +147,43 @@ Deno.test('HTML escapes tenant-controlled and bill-controlled content', async ()
   )
 })
 
+Deno.test('no-electricity final bills say Electricity not charged', async () => {
+  const noChargeBill: FinalBillEmail = {
+    ...bill,
+    totalAmount: 2500,
+    items: [
+      bill.items[0],
+      {
+        itemType: 'adjustment',
+        description: 'Electricity not charged',
+        quantity: 0,
+        unitPrice: 0,
+        amount: 0,
+      },
+    ],
+  }
+
+  await withFetch(
+    async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as {
+        htmlContent: string
+        textContent: string
+      }
+      if (
+        !body.textContent.includes('Electricity not charged') ||
+        !body.htmlContent.includes('Electricity not charged')
+      ) {
+        throw new Error('Expected the no-charge exception in both bill email formats.')
+      }
+      return Response.json({ messageId: 'no-charge-message' })
+    },
+    async () => {
+      const result = await sendEmail('key', 'sender@example.com', noChargeBill, 1)
+      if (result.kind !== 'sent') throw new Error('Expected the no-charge bill to send.')
+    },
+  )
+})
+
 Deno.test('attempt limit is clamped and never becomes negative', async () => {
   let requests = 0
   await withFetch(

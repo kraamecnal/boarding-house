@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AnimatedButton from '@/components/AnimatedButton';
 import ImageField from '@/components/ImageField';
+import MoveOutModal, { type MoveOutInput } from '@/components/MoveOutModal';
 import RoomLabel from '@/components/RoomLabel';
 import TenantEditModal from '@/components/TenantEditModal';
 import { useBills } from '@/contexts/BillsContext';
@@ -77,6 +78,7 @@ export default function RoomDetailScreen() {
   const [meterReadings, setMeterReadings] = useState<MeterReading[]>([]);
   const [isLoadingMeterReadings, setIsLoadingMeterReadings] = useState(true);
   const [meterReadingsError, setMeterReadingsError] = useState<string | null>(null);
+  const [isMoveOutVisible, setIsMoveOutVisible] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [isEditingTenant, setIsEditingTenant] = useState(false);
@@ -244,18 +246,22 @@ export default function RoomDetailScreen() {
   // Only tenants who have already moved in can be archived.
   const canArchive = !!tenant && tenant.startDate <= todayIso();
 
-  const confirmArchive = async () => {
+  const confirmArchive = async (input: MoveOutInput) => {
     if (isArchiving) return;
     setIsArchiving(true);
     setArchiveError(null);
     try {
-      await archiveTenant(room.id);
+      await archiveTenant(room.id, input);
+      setIsMoveOutVisible(false);
       router.back();
     } catch (error: unknown) {
-      setArchiveError(
-        error instanceof Error ? error.message : 'Could not archive this tenant. Please try again.',
-      );
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Could not archive this tenant. Please try again.';
+      setArchiveError(message);
       setIsArchiving(false);
+      throw error;
     }
   };
 
@@ -274,10 +280,10 @@ export default function RoomDetailScreen() {
 
     Alert.alert(
       'Archive tenant?',
-      `${tenant.firstName} ${tenant.lastName}'s information and bill history will move to Archived, and ${room.roomName} will become vacant.${warning}`,
+      `Choose ${tenant.firstName} ${tenant.lastName}'s move-out date and final electricity charge before archiving.${warning}`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Archive', style: 'destructive', onPress: () => void confirmArchive() },
+        { text: 'Continue', onPress: () => setIsMoveOutVisible(true) },
       ],
     );
   };
@@ -671,6 +677,18 @@ export default function RoomDetailScreen() {
             setIsEditingTenant(false);
             setTenantUpdateNotice('Tenant information updated.');
           }}
+        />
+      )}
+
+      {isMoveOutVisible && tenant && (
+        <MoveOutModal
+          visible
+          tenancyId={tenant.tenancyId}
+          tenantName={`${tenant.firstName} ${tenant.lastName}`}
+          onClose={() => {
+            if (!isArchiving) setIsMoveOutVisible(false);
+          }}
+          onConfirm={confirmArchive}
         />
       )}
 
