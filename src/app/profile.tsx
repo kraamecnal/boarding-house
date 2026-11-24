@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
   GestureResponderEvent,
   Modal,
@@ -17,67 +17,26 @@ import ProfileEditModal from '@/components/ProfileEditModal';
 import SetPasswordModal from '@/components/SetPasswordModal';
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
-import { getSupabaseClient } from '@/utils/supabase';
-
-type OwnerProfile = {
-  fullName: string | null;
-  email: string | null;
-};
 
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const { session, hasPaymentPassword } = useAuth();
+  const {
+    session,
+    hasPaymentPassword,
+    ownerProfile,
+    ownerDisplayName,
+    ownerProfileError,
+    applyOwnerProfileUpdate,
+  } = useAuth();
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [passwordSaved, setPasswordSaved] = useState(false);
-  const [profile, setProfile] = useState<OwnerProfile | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ left: number; top: number } | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
-  const email = profile?.email ?? session?.user.email ?? 'No email available';
-  const metadata = session?.user.user_metadata ?? {};
-  const metadataName = [metadata.full_name, metadata.name, metadata.display_name].find(
-    (value): value is string => typeof value === 'string' && value.trim().length > 0,
-  );
-  const storedName =
-    profile?.fullName?.trim() &&
-    profile.fullName.trim().toLowerCase() !== 'null'
-      ? profile.fullName.trim()
-      : null;
-  const displayName = storedName ?? metadataName?.trim() ?? email.split('@')[0];
-
-  useFocusEffect(
-    useCallback(() => {
-      let isCurrent = true;
-      const ownerId = session?.user.id;
-      if (!ownerId) return;
-
-      void getSupabaseClient()
-        .from('owner_profile')
-        .select('full_name, email_address')
-        .eq('id', ownerId)
-        .single()
-        .then(({ data, error }) => {
-          if (!isCurrent) return;
-          if (error) {
-            setProfileError(error.message);
-            return;
-          }
-          setProfileError(null);
-          setProfile({
-            fullName: data.full_name ?? null,
-            email: data.email_address ?? null,
-          });
-        });
-
-      return () => {
-        isCurrent = false;
-        setContextMenu(null);
-      };
-    }, [session?.user.id]),
-  );
+  const email = ownerProfile?.email ?? session?.user.email ?? 'No email available';
+  const displayName = ownerDisplayName;
 
   useEffect(() => {
     if (!notice) return;
@@ -156,9 +115,9 @@ export default function ProfileScreen() {
             Payment password saved.
           </Text>
         )}
-        {profileError && (
+        {ownerProfileError && (
           <Text accessibilityLiveRegion="polite" style={styles.error}>
-            {profileError}
+            {ownerProfileError}
           </Text>
         )}
         {notice && (
@@ -215,10 +174,10 @@ export default function ProfileScreen() {
           ownerId={session.user.id}
           currentName={displayName}
           currentEmail={session.user.email ?? ''}
-          storedFullName={profile?.fullName ?? null}
+          storedFullName={ownerProfile?.fullName ?? null}
           onCancel={() => setEditingProfile(false)}
           onSaved={(updatedProfile) => {
-            setProfile(updatedProfile);
+            applyOwnerProfileUpdate(updatedProfile);
             setEditingProfile(false);
             setNotice('Profile updated');
           }}

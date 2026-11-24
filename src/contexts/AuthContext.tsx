@@ -1,15 +1,33 @@
 import { createClient, type Session } from '@supabase/supabase-js';
-import { createContext, useCallback, useContext, useEffect, useState, type PropsWithChildren } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type PropsWithChildren,
+} from 'react';
 
 import { removeExpoPushToken } from '@/utils/notifications';
 import { getSupabaseClient, isSupabaseConfigured } from '@/utils/supabase';
 
 export type AuthMode = 'sign-in' | 'sign-up';
 
+export type OwnerProfile = {
+  fullName: string | null;
+  email: string | null;
+};
+
 type AuthContextValue = {
   session: Session | null;
   isLoading: boolean;
   initializationError: string | null;
+  ownerProfile: OwnerProfile | null;
+  ownerDisplayName: string;
+  ownerProfileError: string | null;
+  reloadOwnerProfile: () => Promise<void>;
+  applyOwnerProfileUpdate: (profile: OwnerProfile) => void;
   requestEmailOtp: (email: string, mode: AuthMode) => Promise<void>;
   verifyEmailOtp: (email: string, token: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -25,6 +43,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
   const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [ownerProfileState, setOwnerProfileState] = useState<{
+    ownerId: string;
+    profile: OwnerProfile;
+  } | null>(null);
+  const [ownerProfileError, setOwnerProfileError] = useState<string | null>(null);
+  const ownerProfileRequest = useRef(0);
+  const ownerId = session?.user.id;
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -62,6 +87,73 @@ export function AuthProvider({ children }: PropsWithChildren) {
       subscription.unsubscribe();
     };
   }, []);
+
+  const reloadOwnerProfile = useCallback(async () => {
+    const requestId = ++ownerProfileRequest.current;
+    if (!ownerId) {
+      setOwnerProfileState(null);
+      setOwnerProfileError(null);
+      return;
+    }
+
+    setOwnerProfileError(null);
+    try {
+      const { data, error } = await getSupabaseClient()
+        .from('owner_profile')
+        .select('full_name, email_address')
+        .eq('id', ownerId)
+        .single();
+
+      if (requestId !== ownerProfileRequest.current) return;
+      if (error) throw error;
+
+      setOwnerProfileState({
+        ownerId,
+        profile: {
+          fullName: data.full_name ?? null,
+          email: data.email_address ?? null,
+        },
+      });
+    } catch (error: unknown) {
+      if (requestId !== ownerProfileRequest.current) return;
+      setOwnerProfileError(
+        error instanceof Error ? error.message : 'Could not load your owner profile.',
+      );
+    }
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!ownerId) {
+      ownerProfileRequest.current += 1;
+      setOwnerProfileState(null);
+      setOwnerProfileError(null);
+      return;
+    }
+
+    void reloadOwnerProfile();
+    return () => {
+      ownerProfileRequest.current += 1;
+    };
+  }, [ownerId, reloadOwnerProfile]);
+
+  const applyOwnerProfileUpdate = useCallback(
+    (profile: OwnerProfile) => {
+      if (!ownerId) throw new Error('Your signed-in owner account could not be identified.');
+      ownerProfileRequest.current += 1;
+      setOwnerProfileState({ ownerId, profile });
+      setOwnerProfileError(null);
+    },
+    [ownerId],
+  );
+
+  const ownerProfile =
+    ownerProfileState && ownerProfileState.ownerId === ownerId
+      ? ownerProfileState.profile
+      : null;
+  const savedName = normalizeOwnerName(ownerProfile?.fullName);
+  const email = session?.user.email?.trim() ?? '';
+  const emailFallback = email.split('@')[0]?.trim();
+  const ownerDisplayName = savedName ?? (emailFallback || 'Admin');
 
   const requestEmailOtp = useCallback(async (email: string, mode: AuthMode) => {
     const { error } = await getSupabaseClient().auth.signInWithOtp({
@@ -157,6 +249,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         session,
         isLoading,
         initializationError,
+        ownerProfile,
+        ownerDisplayName,
+        ownerProfileError,
+        reloadOwnerProfile,
+        applyOwnerProfileUpdate,
         requestEmailOtp,
         verifyEmailOtp,
         signOut,
@@ -175,4 +272,9 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider.');
   }
   return context;
+}
+
+export function normalizeOwnerName(fullName: string | null | undefined): string | null {
+  const name = fullName?.trim();
+  return name && name.toLowerCase() !== 'null' ? name : null;
 }

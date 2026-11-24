@@ -25,7 +25,7 @@ import { computeDues, type DueItem } from '@/utils/dues';
 export default function ManageScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
+  const { ownerDisplayName } = useAuth();
   const { unreadCount } = useNotifications();
   const {
     rooms,
@@ -73,12 +73,6 @@ export default function ManageScreen() {
       [],
     ),
   );
-  const metadata = session?.user.user_metadata ?? {};
-  const metadataName = [metadata.full_name, metadata.name, metadata.display_name].find(
-    (value): value is string => typeof value === 'string' && value.trim().length > 0,
-  );
-  const username = metadataName?.trim() ?? session?.user.email?.split('@')[0] ?? 'Admin';
-
   return (
     <View style={styles.container}>
       <ScrollView
@@ -113,7 +107,7 @@ export default function ManageScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.greeting}>HELLO, {username}</Text>
+        <Text style={styles.greeting}>HELLO, {ownerDisplayName}</Text>
 
         {isLoadingBills || isLoadingRooms || isLoadingHouses ? (
           <View style={styles.stateCard}>
