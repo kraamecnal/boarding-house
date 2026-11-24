@@ -1,0 +1,76 @@
+// supabase/functions/send-bill-reminders/index.ts
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+Deno.serve(async (req) => {
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  )
+
+  const today = new Date()
+  const threeDaysOut = new Date(today.getTime() + 3 * 86400000)
+
+  // Bills that are unpaid and either due within 3 days or already overdue,
+  // joined to tenants to get their email address.
+  const { data: bills, error } = await supabase
+    .from('monthly_bill')
+    .select('bill_id, due_date, total_amount, last_reminder_sent_at, tenants(email_address, tenant_id)')
+    .eq('is_paid', false)
+    .lte('due_date', threeDaysOut.toISOString().slice(0, 10))
+
+  if (error) {
+    return new Response(JSON.stringify({ error }), { status: 500 })
+  }
+
+  let sentCount = 0
+
+  for (const bill of bills ?? []) {
+    const email = bill.tenants?.email_address
+    if (!email) continue
+
+// Temporarily comment out for testing:
+/*
+    // skip if a reminder was already sent in the last 24h
+    if (bill.last_reminder_sent_at) {
+      const last = new Date(bill.last_reminder_sent_at)
+      if (today.getTime() - last.getTime() < 86400000) continue
+    }
+*/
+    const dueDate = new Date(bill.due_date)
+    const isOverdue = dueDate < today
+    const subject = isOverdue
+      ? 'Your bill is overdue'
+      : 'Your monthly bill is due soon'
+
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'onboarding@resend.dev', // must match your verified Resend domain
+        to: email,
+        subject,
+        html: `<p>Your bill of ₱${bill.total_amount} is ${
+          isOverdue ? 'now overdue' : `due on ${bill.due_date}`
+        }. Please settle it as soon as possible.</p>`,
+      }),
+    })
+
+    if (emailResponse.ok) {
+      sentCount++
+      await supabase
+        .from('monthly_bill')
+        .update({ last_reminder_sent_at: today.toISOString() })
+        .eq('bill_id', bill.bill_id)
+    } else {
+      const errorBody = await emailResponse.text()
+      console.error(`Resend send failed for bill ${bill.bill_id}:`, emailResponse.status, errorBody)
+    }
+  }
+
+  return new Response(JSON.stringify({ checked: bills?.length ?? 0, sent: sentCount }), {
+    status: 200,
+  })
+})

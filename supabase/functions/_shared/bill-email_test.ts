@@ -35,7 +35,7 @@ async function withFetch(
   }
 }
 
-Deno.test('successful Brevo parse failures still report sent with no message ID', async () => {
+Deno.test('successful Resend parse failures still report sent with no message ID', async () => {
   await withFetch(
     async () => new Response('not-json', { status: 201 }),
     async () => {
@@ -47,19 +47,19 @@ Deno.test('successful Brevo parse failures still report sent with no message ID'
   )
 })
 
-Deno.test('successful Brevo responses capture message IDs', async () => {
+Deno.test('successful Resend responses capture message IDs', async () => {
   await withFetch(
-    async () => Response.json({ messageId: 'brevo-message-1' }),
+    async () => Response.json({ id: 'resend-message-1' }),
     async () => {
       const result = await sendEmail('key', 'sender@example.com', bill, 1)
-      if (result.kind !== 'sent' || result.messageId !== 'brevo-message-1') {
-        throw new Error('Expected the Brevo message ID to be retained.')
+      if (result.kind !== 'sent' || result.messageId !== 'resend-message-1') {
+        throw new Error('Expected the Resend message ID to be retained.')
       }
     },
   )
 })
 
-Deno.test('Brevo 429 retries honor Retry-After', async () => {
+Deno.test('Resend 429 retries honor Retry-After', async () => {
   let requests = 0
   await withFetch(
     async () => {
@@ -69,7 +69,7 @@ Deno.test('Brevo 429 retries honor Retry-After', async () => {
             status: 429,
             headers: { 'Retry-After': '0' },
           })
-        : Response.json({ messageId: 'retry-message' })
+        : Response.json({ id: 'retry-message' })
     },
     async () => {
       const result = await sendEmail('key', 'sender@example.com', bill, 1)
@@ -80,7 +80,7 @@ Deno.test('Brevo 429 retries honor Retry-After', async () => {
   )
 })
 
-Deno.test('non-retryable Brevo failures return failed with bounded diagnostics', async () => {
+Deno.test('non-retryable Resend failures return failed with bounded diagnostics', async () => {
   const body = 'x'.repeat(1000)
   await withFetch(
     async () => new Response(body, { status: 400 }),
@@ -126,19 +126,23 @@ Deno.test('HTML escapes tenant-controlled and bill-controlled content', async ()
   await withFetch(
     async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as {
-        htmlContent: string
-        textContent: string
+        from: string
+        to: string[]
+        html: string
+        text: string
       }
       if (
-        body.htmlContent.includes('Guest <One>') ||
-        body.htmlContent.includes('Room 3 & Annex') ||
-        !body.htmlContent.includes('Guest &lt;One&gt;') ||
-        !body.htmlContent.includes('Room 3 &amp; Annex') ||
-        body.textContent.includes('Guest &lt;One&gt;')
+        body.from !== 'sender@example.com' ||
+        body.to[0] !== bill.tenantEmail ||
+        body.html.includes('Guest <One>') ||
+        body.html.includes('Room 3 & Annex') ||
+        !body.html.includes('Guest &lt;One&gt;') ||
+        !body.html.includes('Room 3 &amp; Annex') ||
+        body.text.includes('Guest &lt;One&gt;')
       ) {
-        throw new Error('Expected safe HTML escaping and plain-text values.')
+        throw new Error('Expected the Resend payload and safe email content.')
       }
-      return Response.json({ messageId: 'template-message' })
+      return Response.json({ id: 'template-message' })
     },
     async () => {
       const result = await sendEmail('key', 'sender@example.com', bill, 1)
@@ -166,16 +170,16 @@ Deno.test('no-electricity final bills say Electricity not charged', async () => 
   await withFetch(
     async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as {
-        htmlContent: string
-        textContent: string
+        html: string
+        text: string
       }
       if (
-        !body.textContent.includes('Electricity not charged') ||
-        !body.htmlContent.includes('Electricity not charged')
+        !body.text.includes('Electricity not charged') ||
+        !body.html.includes('Electricity not charged')
       ) {
         throw new Error('Expected the no-charge exception in both bill email formats.')
       }
-      return Response.json({ messageId: 'no-charge-message' })
+      return Response.json({ id: 'no-charge-message' })
     },
     async () => {
       const result = await sendEmail('key', 'sender@example.com', noChargeBill, 1)
@@ -189,7 +193,7 @@ Deno.test('attempt limit is clamped and never becomes negative', async () => {
   await withFetch(
     async () => {
       requests += 1
-      return Response.json({ messageId: 'unexpected' })
+      return Response.json({ id: 'unexpected' })
     },
     async () => {
       const result = await sendEmail('key', 'sender@example.com', bill, 10)

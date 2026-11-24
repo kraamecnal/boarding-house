@@ -167,15 +167,15 @@ function buildEmailContent(bill: FinalBillEmail): {
   return { subject, textContent, htmlContent }
 }
 
-async function readBrevoError(response: Response): Promise<string> {
+async function readResendError(response: Response): Promise<string> {
   const body = (await response.text().catch(() => '')).slice(0, MAX_ERROR_BODY_LENGTH)
   return body
-    ? `Brevo rejected the email request with HTTP ${response.status}: ${body}`
-    : `Brevo rejected the email request with HTTP ${response.status}.`
+    ? `Resend rejected the email request with HTTP ${response.status}: ${body}`
+    : `Resend rejected the email request with HTTP ${response.status}.`
 }
 
 export async function sendEmail(
-  brevoKey: string,
+  resendKey: string,
   senderEmail: string,
   bill: FinalBillEmail,
   attemptCount: number,
@@ -189,22 +189,18 @@ export async function sendEmail(
   for (let requestAttempt = 1; requestAttempt <= maxAttempts; requestAttempt += 1) {
     let response: Response
     try {
-      response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
-          'api-key': brevoKey,
+          Authorization: `Bearer ${resendKey}`,
           'Content-Type': 'application/json',
-          accept: 'application/json',
         },
         body: JSON.stringify({
-          sender: { name: 'InKeeper', email: senderEmail },
-          to: [{
-            email: bill.tenantEmail,
-            ...(bill.tenantName ? { name: bill.tenantName } : {}),
-          }],
+          from: senderEmail,
+          to: [bill.tenantEmail],
           subject,
-          textContent,
-          htmlContent,
+          text: textContent,
+          html: htmlContent,
         }),
         signal: AbortSignal.timeout(10_000),
       })
@@ -218,16 +214,16 @@ export async function sendEmail(
 
     if (response.ok) {
       const payload = await response.json().catch(() => null) as {
-        messageId?: unknown
+        id?: unknown
       } | null
       return {
         kind: 'sent',
         attempts: requestAttempt,
-        messageId: typeof payload?.messageId === 'string' ? payload.messageId : null,
+        messageId: typeof payload?.id === 'string' ? payload.id : null,
       }
     }
 
-    const error = await readBrevoError(response)
+    const error = await readResendError(response)
     if (response.status === 429) {
       const retryAt = retryAfterDate(
         response.headers.get('Retry-After'),

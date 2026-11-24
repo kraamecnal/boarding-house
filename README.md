@@ -105,19 +105,19 @@ The database queues push requests asynchronously through `pg_net`, so a push-ser
 
 `send-bill-reminders-daily` runs `send-bill-reminders` at 8:00 AM Asia/Manila (`0 0 * * *` in pg_cron UTC). It sends only owner in-app/Expo push reminders for bills that are not finalized: one at two days before the due date and one per day on or after the due date. Owner reminders do not include amounts.
 
-Saving an electricity reading recalculates a bill but does not finalize it or email the tenant. The authenticated `finalize-tenant-bill` function performs explicit finalization and sends the itemized final bill. `resend-tenant-bill` resends an already-finalized bill without changing `billed_at`. Brevo sends can resolve as `sent`, `failed`, or `uncertain`; an uncertain timeout/5xx/network outcome is never automatically resent.
+Saving an electricity reading recalculates a bill but does not finalize it or email the tenant. The authenticated `finalize-tenant-bill` function performs explicit finalization and sends the itemized final bill. `resend-tenant-bill` resends an already-finalized bill without changing `billed_at`. Resend sends can resolve as `sent`, `failed`, or `uncertain`; an uncertain timeout/5xx/network outcome is never automatically resent.
 
-The `split_bill_reminder_delivery` migration adds the owner/tenant reminder types, per-day owner uniqueness, one-per-bill tenant uniqueness, delivery status, attempts, retry state, and Brevo message IDs. It also creates a pre-migration copy at `private.bill_reminders_backup_20261121`.
+The `split_bill_reminder_delivery` migration adds the owner/tenant reminder types, per-day owner uniqueness, one-per-bill tenant uniqueness, delivery status, attempts, retry state, and provider message IDs. It also creates a pre-migration copy at `private.bill_reminders_backup_20261121`.
 
 Set the following Edge Function secrets in the target Supabase project. Do not put their values in app code or commit them:
 
 ```sh
 npx supabase db push --project-ref <project-ref>
-npx supabase secrets set BREVO_API_KEY=<brevo-api-key> BREVO_SENDER_EMAIL=<verified-sender-email> --project-ref <project-ref>
+npx supabase secrets set RESEND_API_KEY=<resend-api-key> --project-ref <project-ref>
 npx supabase functions deploy send-bill-reminders finalize-tenant-bill resend-tenant-bill --project-ref <project-ref>
 ```
 
-Supabase provides `SUPABASE_URL`; the deployed functions also use the existing server-side `SERVER_API_SECRET`, `BILL_REMINDERS_CRON_TOKEN`, `BREVO_API_KEY`, and `BREVO_SENDER_EMAIL` secrets. Finalize and resend require a signed-in owner JWT. Run the pure checks with `deno test supabase/functions/send-bill-reminders/reminder-logic_test.ts supabase/functions/_shared/bill-email_test.ts`; use a controlled recipient for end-to-end email tests, never a real tenant.
+Supabase provides `SUPABASE_URL`; the deployed functions also use the existing server-side `SERVER_API_SECRET`, `BILL_REMINDERS_CRON_TOKEN`, and `RESEND_API_KEY` secrets. Finalize and resend default to the verified sender `InKeeper <billing@innk3eper.xyz>`; set the optional `RESEND_SENDER_EMAIL` secret if that sender changes. Finalize and resend require a signed-in owner JWT. Run the pure checks with `deno test supabase/functions/send-bill-reminders/reminder-logic_test.ts supabase/functions/_shared/bill-email_test.ts`; use a controlled recipient for end-to-end email tests, never a real tenant.
 
 ### Notification checks
 

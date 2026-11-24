@@ -132,9 +132,10 @@ Deno.serve(async (request: Request) => {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const serverApiSecret = Deno.env.get('SERVER_API_SECRET')
-  const brevoKey = Deno.env.get('BREVO_API_KEY')
-  const senderEmail = Deno.env.get('BREVO_SENDER_EMAIL')
-  if (!supabaseUrl || !serverApiSecret || !brevoKey || !senderEmail) {
+  const resendKey = Deno.env.get('RESEND_API_KEY')
+  const senderEmail = Deno.env.get('RESEND_SENDER_EMAIL') ??
+    'InKeeper <billing@innk3eper.xyz>'
+  if (!supabaseUrl || !serverApiSecret || !resendKey) {
     console.error('Final bill resend is missing required server configuration.')
     return jsonResponse({ error: 'Bill email delivery is not configured.' }, 500)
   }
@@ -183,7 +184,7 @@ Deno.serve(async (request: Request) => {
     tenantEmail,
   }
   const result = await sendEmail(
-    brevoKey,
+    resendKey,
     senderEmail,
     email,
     preparation.attemptCount,

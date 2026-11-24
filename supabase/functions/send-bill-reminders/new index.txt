@@ -1,0 +1,89 @@
+// supabase/functions/send-bill-reminders/index.ts  (Brevo version)
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+// NOTE: monthly_bill no longer has a last_reminder_sent_at column, so there is
+// currently NO duplicate-send protection. Every run emails every qualifying bill.
+
+// While true, the paid / due-date filters are skipped and EVERY bill that has a
+// tenant email gets an email. Set to false before the demo or real use.
+const TEST_MODE = true
+
+Deno.serve(async (req) => {
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  )
+
+  const brevoKey = Deno.env.get('BREVO_API_KEY')
+  const senderEmail = Deno.env.get('BREVO_SENDER_EMAIL')
+  if (!brevoKey || !senderEmail) {
+    return new Response(
+      JSON.stringify({ error: 'Missing BREVO_API_KEY or BREVO_SENDER_EMAIL secret' }),
+      { status: 500 }
+    )
+  }
+
+  const today = new Date()
+  const threeDaysOut = new Date(today.getTime() + 3 * 86400000)
+
+  // Normal mode: unpaid bills that are due within 3 days or already overdue.
+  // TEST_MODE: every bill, regardless of paid status or due date.
+  let query = supabase
+    .from('monthly_bill')
+    .select('bill_id, due_date, total_amount, tenancy(tenancy_id, tenants(email_address, name))')
+
+  if (!TEST_MODE) {
+    query = query
+      .eq('is_paid', false)
+      .lte('due_date', threeDaysOut.toISOString().slice(0, 10))
+  }
+
+  const { data: bills, error } = await query
+
+  if (error) {
+    return new Response(JSON.stringify({ error }), { status: 500 })
+  }
+
+  let sentCount = 0
+
+  for (const bill of bills ?? []) {
+    const tenancy = Array.isArray(bill.tenancy) ? bill.tenancy[0] : bill.tenancy
+    const tenant = Array.isArray(tenancy?.tenants) ? tenancy.tenants[0] : tenancy?.tenants
+    const email = tenant?.email_address
+    if (!email) continue
+
+    const dueDate = new Date(bill.due_date)
+    const isOverdue = dueDate < today
+    const subject = isOverdue
+      ? 'Your bill is overdue'
+      : 'Your monthly bill is due soon'
+
+    const emailResponse = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': brevoKey,
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: 'Inkeeper', email: senderEmail }, // must be a verified sender in Brevo
+        to: [{ email }],
+        subject,
+        htmlContent: `<p>Your bill of ₱${bill.total_amount} is ${
+          isOverdue ? 'now overdue' : `due on ${bill.due_date}`
+        }. Please settle it as soon as possible.</p>`,
+      }),
+    })
+
+    if (emailResponse.ok) {
+      sentCount++
+    } else {
+      const errorBody = await emailResponse.text()
+      console.error(`Brevo send failed for bill ${bill.bill_id}:`, emailResponse.status, errorBody)
+    }
+  }
+
+  return new Response(JSON.stringify({ checked: bills?.length ?? 0, sent: sentCount }), {
+    status: 200,
+  })
+})
