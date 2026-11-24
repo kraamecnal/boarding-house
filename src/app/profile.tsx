@@ -1,106 +1,238 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  GestureResponderEvent,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import ProfileEditModal from '@/components/ProfileEditModal';
 import SetPasswordModal from '@/components/SetPasswordModal';
 import { DashboardColors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { getSupabaseClient } from '@/utils/supabase';
+
+type OwnerProfile = {
+  fullName: string | null;
+  email: string | null;
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { session, signOut, hasPaymentPassword } = useAuth();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { session, hasPaymentPassword } = useAuth();
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [passwordSaved, setPasswordSaved] = useState(false);
-  const [isSigningOut, setIsSigningOut] = useState(false);
-  const [signOutError, setSignOutError] = useState<string | null>(null);
-  const email = session?.user.email ?? 'No email available';
+  const [profile, setProfile] = useState<OwnerProfile | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ left: number; top: number } | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const email = profile?.email ?? session?.user.email ?? 'No email available';
   const metadata = session?.user.user_metadata ?? {};
-  const displayName = [metadata.full_name, metadata.name, metadata.display_name].find(
+  const metadataName = [metadata.full_name, metadata.name, metadata.display_name].find(
     (value): value is string => typeof value === 'string' && value.trim().length > 0,
   );
+  const storedName =
+    profile?.fullName?.trim() &&
+    profile.fullName.trim().toLowerCase() !== 'null'
+      ? profile.fullName.trim()
+      : null;
+  const displayName = storedName ?? metadataName?.trim() ?? email.split('@')[0];
 
-  const handleSignOut = async () => {
-    setSignOutError(null);
-    setIsSigningOut(true);
-    try {
-      await signOut();
-    } catch (error: unknown) {
-      setSignOutError(error instanceof Error ? error.message : 'Unable to sign out. Try again.');
-    } finally {
-      setIsSigningOut(false);
-    }
+  useFocusEffect(
+    useCallback(() => {
+      let isCurrent = true;
+      const ownerId = session?.user.id;
+      if (!ownerId) return;
+
+      void getSupabaseClient()
+        .from('owner_profile')
+        .select('full_name, email_address')
+        .eq('id', ownerId)
+        .single()
+        .then(({ data, error }) => {
+          if (!isCurrent) return;
+          if (error) {
+            setProfileError(error.message);
+            return;
+          }
+          setProfileError(null);
+          setProfile({
+            fullName: data.full_name ?? null,
+            email: data.email_address ?? null,
+          });
+        });
+
+      return () => {
+        isCurrent = false;
+        setContextMenu(null);
+      };
+    }, [session?.user.id]),
+  );
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const showContextMenu = (event: GestureResponderEvent) => {
+    const menuWidth = 112;
+    const menuHeight = 46;
+    const edge = 12;
+    const minimumTop = insets.top + 64;
+    const maximumTop = Math.max(
+      minimumTop,
+      windowHeight - Math.max(insets.bottom, edge) - menuHeight - edge,
+    );
+    const minimumLeft = edge;
+    const maximumLeft = Math.max(minimumLeft, windowWidth - menuWidth - edge);
+    const proposedLeft = event.nativeEvent.pageX - menuWidth / 2;
+    const proposedTop = event.nativeEvent.pageY + 10;
+
+    setContextMenu({
+      left: Math.min(Math.max(proposedLeft, minimumLeft), maximumLeft),
+      top:
+        proposedTop <= maximumTop
+          ? Math.max(proposedTop, minimumTop)
+          : Math.max(event.nativeEvent.pageY - menuHeight - 10, minimumTop),
+    });
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.card}>
-        <View style={styles.avatar}>
-          <Ionicons color={DashboardColors.primary} name="person" size={30} />
-        </View>
-        <Text style={styles.name}>{displayName?.trim() ?? email.split('@')[0]}</Text>
-        <Text style={styles.email}>{email}</Text>
-      </View>
+    <View style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.container}>
+        <Pressable
+          accessibilityLabel={`Edit profile for ${displayName}`}
+          accessibilityRole="button"
+          delayLongPress={650}
+          onLongPress={showContextMenu}
+          style={styles.card}>
+          <View style={styles.avatar}>
+            <Ionicons color={DashboardColors.primary} name="person" size={30} />
+          </View>
+          <Text style={styles.name}>{displayName}</Text>
+          <Text style={styles.email}>{email}</Text>
+        </Pressable>
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => {
-          setPasswordSaved(false);
-          setPasswordModalVisible(true);
-        }}
-        style={styles.row}>
-        <View style={styles.rowCopy}>
-          <Text style={styles.rowTitle}>
-            {hasPaymentPassword ? 'Change payment password' : 'Set payment password'}
-          </Text>
-          <Text style={styles.rowDescription}>
-            {hasPaymentPassword
-              ? 'Required to mark bills as paid'
-              : 'Not set yet. Required to mark bills as paid'}
-          </Text>
-        </View>
-        <Ionicons color={DashboardColors.neutral} name="chevron-forward" size={20} />
-      </Pressable>
-      {hasPaymentPassword && (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push('/auth/recover-payment-password')}
-          style={styles.forgotPassword}>
-          <Text style={styles.forgotPasswordLabel}>Forgot password?</Text>
+          onPress={() => {
+            setPasswordSaved(false);
+            setPasswordModalVisible(true);
+          }}
+          style={styles.row}>
+          <View style={styles.rowCopy}>
+            <Text style={styles.rowTitle}>
+              {hasPaymentPassword ? 'Change payment password' : 'Set payment password'}
+            </Text>
+            <Text style={styles.rowDescription}>
+              {hasPaymentPassword
+                ? 'Required to mark bills as paid'
+                : 'Not set yet. Required to mark bills as paid'}
+            </Text>
+          </View>
+          <Ionicons color={DashboardColors.neutral} name="chevron-forward" size={20} />
         </Pressable>
-      )}
-      {passwordSaved && (
-        <Text accessibilityLiveRegion="polite" style={styles.success}>
-          Payment password saved.
-        </Text>
-      )}
-
-      {signOutError && <Text accessibilityLiveRegion="polite" style={styles.error}>{signOutError}</Text>}
-      <Pressable
-        accessibilityRole="button"
-        disabled={isSigningOut}
-        onPress={handleSignOut}
-        style={styles.signOut}>
-        {isSigningOut ? (
-          <ActivityIndicator color={DashboardColors.primary} />
-        ) : (
-          <Text style={styles.signOutLabel}>Sign out</Text>
+        {hasPaymentPassword && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/auth/recover-payment-password')}
+            style={styles.forgotPassword}>
+            <Text style={styles.forgotPasswordLabel}>Forgot password?</Text>
+          </Pressable>
         )}
-      </Pressable>
+        {passwordSaved && (
+          <Text accessibilityLiveRegion="polite" style={styles.success}>
+            Payment password saved.
+          </Text>
+        )}
+        {profileError && (
+          <Text accessibilityLiveRegion="polite" style={styles.error}>
+            {profileError}
+          </Text>
+        )}
+        {notice && (
+          <View accessibilityLiveRegion="polite" style={styles.notice}>
+            <Text style={styles.noticeText}>{notice}</Text>
+          </View>
+        )}
 
-      <SetPasswordModal
-        visible={passwordModalVisible}
-        onClose={() => setPasswordModalVisible(false)}
-        onSaved={() => {
-          setPasswordModalVisible(false);
-          setPasswordSaved(true);
-        }}
-      />
-    </ScrollView>
+        <SetPasswordModal
+          visible={passwordModalVisible}
+          onClose={() => setPasswordModalVisible(false)}
+          onSaved={() => {
+            setPasswordModalVisible(false);
+            setPasswordSaved(true);
+          }}
+        />
+      </ScrollView>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setContextMenu(null)}
+        statusBarTranslucent
+        transparent
+        visible={contextMenu !== null}>
+        <View style={styles.contextMenuOverlay}>
+          <Pressable
+            accessibilityLabel="Dismiss edit menu"
+            accessibilityRole="button"
+            onPress={() => setContextMenu(null)}
+            style={StyleSheet.absoluteFill}
+          />
+          {contextMenu && (
+            <Pressable
+              accessibilityLabel="Edit profile"
+              accessibilityRole="menuitem"
+              onPress={() => {
+                setContextMenu(null);
+                setEditingProfile(true);
+              }}
+              style={({ pressed }) => [
+                styles.contextMenu,
+                { left: contextMenu.left, top: contextMenu.top },
+                pressed && styles.contextMenuPressed,
+              ]}>
+              <Ionicons color="#2563EB" name="create-outline" size={19} />
+              <Text style={styles.contextMenuLabel}>Edit</Text>
+            </Pressable>
+          )}
+        </View>
+      </Modal>
+
+      {editingProfile && session?.user.id && (
+        <ProfileEditModal
+          ownerId={session.user.id}
+          currentName={displayName}
+          currentEmail={session.user.email ?? ''}
+          storedFullName={profile?.fullName ?? null}
+          onCancel={() => setEditingProfile(false)}
+          onSaved={(updatedProfile) => {
+            setProfile(updatedProfile);
+            setEditingProfile(false);
+            setNotice('Profile updated');
+          }}
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: DashboardColors.white,
+  },
   container: {
     flexGrow: 1,
     padding: 20,
@@ -171,17 +303,45 @@ const styles = StyleSheet.create({
     color: '#067647',
     fontSize: 14,
   },
-  signOut: {
-    minHeight: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: DashboardColors.border,
+  notice: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderRadius: 12,
+    backgroundColor: '#1F2937',
   },
-  signOutLabel: {
-    color: DashboardColors.primary,
-    fontSize: 15,
+  noticeText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  contextMenuOverlay: {
+    flex: 1,
+  },
+  contextMenu: {
+    position: 'absolute',
+    width: 112,
+    height: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.16,
+    shadowRadius: 7,
+    elevation: 6,
+  },
+  contextMenuPressed: {
+    backgroundColor: '#EFF6FF',
+  },
+  contextMenuLabel: {
+    color: '#1E293B',
+    fontSize: 14,
     fontWeight: '700',
   },
 });

@@ -266,6 +266,11 @@ otp_expiry = 3600
 subject = "Reset your InKeeper payment password"
 content_path = "./supabase/templates/recovery.html"
 
+# Use a one-time code when confirming an account email change.
+[auth.email.template.email_change]
+subject = "Confirm your new email address"
+content_path = "./supabase/templates/email_change.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true
