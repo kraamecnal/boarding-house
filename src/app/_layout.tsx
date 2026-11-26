@@ -92,7 +92,7 @@ function AppNavigator() {
           name="register-house"
           options={{ title: 'Register Boarding House', presentation: 'modal' }}
         />
-        <Stack.Screen name="bh/[id]/index" options={{ title: 'Tenant Keeper' }} />
+        <Stack.Screen name="bh/[id]/index" options={{ title: 'InKeeper' }} />
         <Stack.Screen
           name="bh/[id]/room/new"
           options={{ title: 'Create Room', presentation: 'modal' }}

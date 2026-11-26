@@ -19,10 +19,7 @@
       },
       "googleServicesFile": "./google-services.json",
       "package": "com.hoynaayiring.inkeeper",
-      "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.RECORD_AUDIO"
-      ]
+      "predictiveBackGestureEnabled": false
     },
     "web": {
       "output": "static",
