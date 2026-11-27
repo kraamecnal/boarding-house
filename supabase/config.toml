@@ -416,3 +416,6 @@ enabled = true
 
 [functions.send-bill-reminders]
 verify_jwt = false
+
+[functions.send-tenant-bill-emails]
+verify_jwt = true
